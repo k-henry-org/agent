@@ -157,7 +157,7 @@ vendor-specific anywhere.
       **designed-but-dormant contracts**: no phase wires real vendors to them (see the
       Phase 15–16 and 19–22 tombstones). The other agnostic seam, `Strategy`, is internal
       and lands in Phase 11.
-- [ ] **P3.4** Reference impls proving the seams: `PaperBroker` + `EchoAi` in `exub-core`,
+- [x] **P3.4** Reference impls proving the seams: `PaperBroker` + `EchoAi` in `exub-core`,
       the `MockSource` feed in `market-data` — and the dependency direction enforced:
       `market-data` + `signals` depend on the traits, never a concrete vendor.
 

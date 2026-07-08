@@ -198,4 +198,41 @@ mod tests {
         assert!(!src.supports(Capability::OptionsChain));
         assert_eq!(src.info().kind, ProviderKind::MarketData);
     }
+
+    /// One test fn for every `MassiveSource` path that exists today, because they all
+    /// touch the process-global `MASSIVE_API_KEY` env var — a single sequential fn
+    /// avoids races with cargo's parallel test threads (no other test reads it).
+    #[tokio::test]
+    async fn massive_stub_auth_and_not_implemented() {
+        // No key → a typed Auth error, not a panic or a silent default.
+        std::env::remove_var("MASSIVE_API_KEY");
+        assert_eq!(
+            MassiveSource::from_env().err(),
+            Some(ProviderError::Auth("MASSIVE_API_KEY not set".into()))
+        );
+
+        // With a key the stub constructs, advertises its card, and returns honest
+        // NotImplemented from both trait methods (never fabricated data).
+        std::env::set_var("MASSIVE_API_KEY", "test-key-not-real");
+        let src = MassiveSource::from_env().expect("key is set");
+        assert_eq!(src.info().id, "massive");
+        assert_eq!(
+            src.daily_bars("SPY", 10).await,
+            Err(ProviderError::NotImplemented("MassiveSource::daily_bars"))
+        );
+        assert_eq!(
+            src.iv_snapshot("SPY").await,
+            Err(ProviderError::NotImplemented("MassiveSource::iv_snapshot"))
+        );
+        // Snapshot-only card (no OptionsHistory) → the engine must ACCUMULATE its IV
+        // history forward (Phase 8) — the capability-driven strategy, pinned on a real
+        // vendor's card rather than a synthetic test double.
+        assert!(!src.supports(Capability::OptionsHistory));
+        assert_eq!(
+            exub_core::iv_history_strategy(&src),
+            exub_core::IvHistoryStrategy::Accumulate
+        );
+
+        std::env::remove_var("MASSIVE_API_KEY");
+    }
 }

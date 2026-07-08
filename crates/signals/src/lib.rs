@@ -220,6 +220,32 @@ mod tests {
         assert!(r.fail_reasons.iter().any(|s| s.contains("big moves")));
     }
 
+    /// The exit-gate property for Phase 3: the screen runs against the feed *purely
+    /// through the trait*. Production hands `scan` a `Box<dyn MarketDataProvider>` from
+    /// the registry (dynamic dispatch); this pins that path with a test, asserting the
+    /// `&dyn` screen agrees with the concrete (monomorphized) one.
+    #[tokio::test]
+    async fn screen_runs_through_dyn_provider() {
+        let mut src = MockSource::new();
+        src.insert_from_closes("MOVER", &mover_series(), 0.20, vec![0.15, 0.60]);
+        let c = CheapVolCriteria {
+            lookback_days: 100,
+            ..Default::default()
+        };
+
+        let concrete = evaluate(&src, "MOVER", &c).await.unwrap();
+
+        let dyn_src: &dyn MarketDataProvider = &src;
+        let via_dyn = evaluate(dyn_src, "MOVER", &c).await.unwrap();
+        assert_eq!(via_dyn.passed, concrete.passed);
+        assert_eq!(via_dyn.iv_rank, concrete.iv_rank);
+        assert_eq!(via_dyn.realized_vol, concrete.realized_vol);
+
+        let hits = scan(dyn_src, &["MOVER"], &c).await;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].symbol, "MOVER");
+    }
+
     #[tokio::test]
     async fn insufficient_history_fails_honestly() {
         let mut src = MockSource::new();
