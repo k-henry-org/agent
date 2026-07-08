@@ -1,9 +1,9 @@
 # Contributing
 
-Thanks for your interest. **exuberance** is a grounded trade-*discovery* engine in
-Rust: it helps discretionary traders *find* trades across **any market and any
-strategy** — plug in any data feed, AI model, or broker behind a trait — and it
-**finds and cites; it never recommends and never acts.**
+Thanks for your interest. **agent** (working name) is a guardrail-detection kernel in
+Rust: tiny classifiers (prompt-injection, PII, secrets, toxicity) compiled into
+**portable, signed WASM artifacts** that run identically everywhere — embedded via
+wasmtime, at the edge, in a browser. **It detects and cites; it never decides.**
 
 > Read [**`.rules`**](./.rules) first — the operating manual and the invariants that
 > must never be traded away (`CLAUDE.md`, `AGENTS.md`, and `GEMINI.md` all point
@@ -11,105 +11,92 @@ strategy** — plug in any data feed, AI model, or broker behind a trait — and
 
 ## Prerequisites
 
-- **Rust, stable** ([install `rustup`](https://www.rust-lang.org/tools/install)).
-  No nightly, no `sudo`, no codegen step.
-- For **real data** (later milestones): an API key for your chosen feed, set via
-  **environment variables** — never committed. Data-feed keys are the *only* keys
-  the engine ever reads: it contains no LLM code (agents bring their own model
-  over MCP) and no execution path (no broker credentials, ever). For **no keys at
-  all**: the built-in **mock** feed is the keyless default, so every command
-  builds, runs, tests, and demos offline.
+- **Rust, stable** ([install `rustup`](https://www.rust-lang.org/tools/install)),
+  plus the `wasm32-unknown-unknown` target (`rustup target add
+  wasm32-unknown-unknown`) for building detector artifacts. No nightly, no `sudo`.
+- **No API keys — ever.** The detection path needs none by design, and the mock
+  detector keeps every command, test, and demo keyless and offline.
 
 ## Quick start
 
 ```console
-git clone <repo> && cd exuberance
+git clone <repo> && cd <repo>
 cargo build
 
-# The mock feed + mock model are the keyless default — no API keys, no network:
-cargo run -p cli -- scan        # the demo screen (cited evidence, not advice) over synthetic data
-cargo run -p cli -- providers   # the plug-in catalog: data feeds, AI models, coding agents, brokers
+# The mock detector is the keyless default — no keys, no network, no registry:
+cargo run -p cli -- check --detector mock "text to scan"   # rendered Verdict
+cargo run -p cli -- check --detector mock --json < file    # wire output; exit 1 = detection
 ```
 
-Config is layered **flags > env (`EXUB_*`) > file (TOML) > defaults**; `mock` is the
-keyless default. Pick a feed with `--data-provider` (or the `EXUB_*` vars / a
-`--config` TOML). Secrets come from **provider-native env vars only**
-(`MASSIVE_API_KEY`, `ALPHA_VANTAGE_API_KEY`, …), never the config file — and only
-data-feed keys exist; the engine reads no model or broker credentials.
+Config is layered **flags > env (`AGENT_*`) > file (TOML) > defaults**. Exit codes
+are contract: `0` clean · `1` detection fired · `2`+ operational error.
 
 ## Before you push — the local gate
 
-Run the same checks CI runs, in one shot:
-
 ```console
 cargo install cargo-deny cargo-hack   # one-time: the gate shells out to both
-cargo xtask ci                        # fmt + clippy -D warnings + build + test + docs + feature powerset + deny
+cargo xtask ci                        # fmt + clippy -D warnings + build + test + docs
+                                      # + feature powerset + deny + artifact goldens
 ```
 
-…or the steps individually:
-
-```console
-cargo fmt --all --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-features --locked                              # offline: mock adapters + fixtures
-cargo doc --no-deps --workspace --all-features --locked         # RUSTDOCFLAGS="-D warnings"
-cargo hack --feature-powerset --no-dev-deps check --workspace   # no --locked: --no-dev-deps rewrites manifests
-cargo deny check
-```
-
-CI mirrors this on `ubuntu-latest` with stable Rust and **no API keys** — the mock
-adapters keep the whole pipeline offline and deterministic.
+The gate also **builds every `detectors/*` source to wasm and runs its golden
+verdicts** — a detector change that shifts a verdict fails CI unless its goldens
+are updated in the same change. CI mirrors the gate on `ubuntu-latest` with no
+secrets.
 
 ## The testing approach
 
-Almost everything runs **offline, with no API keys**, via the mock adapters:
+Everything runs **offline and keyless**:
 
-1. **Unit / pure:** vol math, screen logic, config precedence, adapter mappings,
-   format helpers — table-driven, no network.
-2. **Contract tests (recorded fixtures):** each real adapter (as they land) replays
-   a captured provider response, so its raw→canonical mapping is deterministic
-   and **API drift fails CI**, not a live scan.
-3. **Known-answer / grounding evals:** verifiable inputs → asserted outputs, plus a
-   check that a surfaced `Finding` is backed by the data it cites. The honesty
-   backstop.
-
-Every new screen/strategy/metric ships with unit tests against known inputs.
+1. **Unit / pure:** ABI encode/decode, config precedence, span math, verdict
+   rendering — table-driven, no network.
+2. **Golden verdicts per detector:** `detectors/*/cases/` pairs input text with the
+   expected `Verdict` JSON; run against the *built artifact* by the gate.
+3. **Determinism tests:** the same input × 100 runs × two targets must produce
+   byte-identical verdicts; learned detectors additionally prove cross-architecture
+   identity (quantized math).
+4. **Eval scorecards (Phase 6):** precision/recall on public corpora, CI-generated,
+   with a regression fence — quality drops fail the gate.
 
 ## The invariants (never trade these away)
 
-- **Agnostic by trait, not `if vendor ==`.** A new feed, model, broker, or strategy
-  is a **new adapter behind a trait** — never a special case in the core. If a
-  change makes the engine name a vendor, the design is wrong.
-- **Finds, never recommends.** No phase adds a "buy/sell" verdict or an autonomous
-  action. The engine surfaces cited evidence; the human decides and trades.
-- **The engine authors the number, not the LLM.** Figures (IV rank, realized/implied,
-  …) are computed and cited by the engine, so they can't be hallucinated.
-- **No-panic discipline.** `unwrap`/`expect`/`panic!` are denied outside tests
-  (workspace clippy lints; `clippy.toml` re-allows them in tests). A failed
-  feed/model/broker call is a **value** (`Err`) that degrades to a clear message.
-- **Secrets out of the repo.** Keys come from the environment only; never commit,
-  log, or embed them, and never put a real key or fetched data in a fixture.
-- **Offline-testable core.** `vol` / `exub-core` / `signals` build and test with no
-  network; live adapters hide behind features and test against fixtures.
+- **Agnostic by ABI, not by host or detector.** A new detector, inference
+  technique, or host language is a new artifact/SDK behind the frozen contract —
+  never a special case in the kernel.
+- **Detects, never decides.** No policy (block/redact/route) in the kernel; spans
+  are lossless so the *host* can act.
+- **Deterministic by absence.** No clocks, randomness, network, or filesystem
+  inside the sandbox; an artifact importing anything beyond the ABI fails to load.
+- **Measured, not marketed.** Scorecards are CI-generated; hand-written accuracy
+  claims are forbidden.
+- **The wire contract is sacred.** `Verdict` JSON + exit codes are golden-tested
+  and evolve additively-only.
+- **No LLM code, no model keys, no secrets.** Fixture credentials are synthetic
+  only — never real, not even revoked.
+- **No-panic discipline.** `unwrap`/`expect`/`panic!` denied outside tests; every
+  failure is a typed value.
+- **Artifacts are source.** Wasm binaries are built by the gate, signed at
+  release — never hand-committed.
 
 ## Phases & decisions
 
 Work is organized into sequentially-gated phases in [`ROADMAP.md`](./ROADMAP.md) —
 the **single source of truth for progress**. Its checkboxes are the state: work the
-first unchecked box in ID order, verify-before-building, and check the box **in the
-same commit** as the work (referencing the ID, e.g. `P8.2: …`). A phase isn't left
-until its **Exit gate** line passes; the next isn't started before that. Items tagged
-`(decision)` record the significant, hard-to-reverse choice in `ARCHITECTURE.md`
-(consolidated in P25.3) so the *why* outlives the diff.
+first unchecked box in ID order, one item per iteration, and check the box **in the
+same commit** as the work (referencing the ID, e.g. `P3.2: …`). A phase isn't left
+until its **Exit gate** passes; the next isn't started before that. Items tagged
+`(decision)` record the hard-to-reverse choice in `ARCHITECTURE.md` (consolidated
+in P13.2) so the *why* outlives the diff.
 
 ## Commit & PR conventions
 
-- One logical change per commit; **imperative** subject ("Add the Massive adapter",
-  not "added the Massive adapter").
-- **Never add an AI co-author or attribution trailer** — no `Co-Authored-By: Claude …`
-  or similar. Never commit secrets or fetched/generated data.
-- A new provider or strategy is a new **adapter behind a trait**, never a special
-  case in the core.
+- One logical change per commit; **imperative** subject ("Add the PII detector",
+  not "added the PII detector").
+- **Never add an AI co-author or attribution trailer** — no `Co-Authored-By:
+  Claude …` or similar. Never commit secrets, real credentials (even revoked), or
+  built wasm binaries.
+- A new detector is a new `detectors/` directory (source + manifest + goldens),
+  never a runtime special case.
 - Every PR must pass the full gate (`cargo xtask ci`).
 
 ## License

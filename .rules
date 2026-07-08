@@ -1,175 +1,104 @@
-# exuberance
+# agent *(working name)*
 
-A grounded trade-*discovery* engine + AI cockpit for discretionary traders —
-**any market, any strategy. It finds and cites; it never recommends and never
-acts.** A Rust engine whose **data feeds and strategies plug in behind traits**,
-surfaced through a CLI and (on the roadmap) an MCP server — not tied to one asset
-class, one strategy, one data vendor, or one AI harness. The engine contains **no
-LLM code and no execution path** — intelligence connects from outside over MCP,
-and you trade in your own brokerage. This file is the operating manual — read it
-every session.
+A guardrail-**detection kernel** — tiny classifiers (prompt-injection, PII, secrets,
+toxicity/jailbreak) compiled into **portable, signed WASM artifacts** that run
+anywhere: embedded via **wasmtime** in a Rust/Go/Python service, in an edge worker,
+in a proxy hot path, in a browser. One artifact, one frozen ABI, identical verdicts
+everywhere. **It detects and cites; it never decides** — policy (block/redact/route)
+belongs to the embedding host or control plane (⟐ the Go `operator` suite), never to
+this kernel. This file is the operating manual — read it every session.
 
-**Scope: all traders, not just options/vol.** The engine is strategy- and
-asset-class-agnostic (equities, options, futures, crypto, FX). The cheap-vol /
-proven-mover setup below is the **flagship *reference* strategy** — the first
-worked example that proves the seam — not the definition of the product. New
-strategies plug in behind a `Strategy` trait the same way a data feed or broker
-does.
+**Scope: the kernel and its artifacts, not a guardrail service.** The guardrail
+market is saturated at the service/library layer (Lakera, llm-guard, NeMo
+Guardrails); nobody ships the detector as a portable artifact. **The wedge is the
+packaging, not the classifier.** If a change turns this repo into one more hosted
+guardrail service — or puts policy logic in the kernel — the design is wrong.
 
-**What it is, in one line: a grounded trade-*discovery* engine. It helps you
-*find* trades — it never recommends them and never acts.** The engine surfaces
-candidates and the evidence that justifies them, each grounded in real data and
-cited; *you* decide and place the trade. This is decision **support**, not advice,
-and not autonomous execution. See `ROADMAP.md` for the architecture and plan.
-
-**Why this engine exists (vs. Massive's MCP).** Massive already ships an MCP
-server that hands an agent raw data, so raw *access* is not the reason to exist —
-the value is what we compute on top and cite. Three load-bearing differentiators
-(shown with the flagship vol strategy, but each holds for *any* strategy):
-(1) the **edge is a deterministic computation** — for cheap-vol that's IV rank /
-realized-vs-implied / move-counting; for momentum or mean-reversion it's their own
-signals — that an LLM can't be trusted to eyeball; the engine authors the number
-and cites its inputs, the model never does; (2) **a strategy needs accumulated
-state no snapshot call returns** — cheap-vol needs a 1–3yr IV *series* to rank
-against; every strategy has state like this the engine must persist, so the signal
-is only computable *because* the engine exists; (3) the engine then becomes a
-**higher-order MCP** exposing *grounded, cited signals* (not raw data) to Claude
-Code / Gemini CLI / Codex. If a change makes the engine a thin passthrough to a
-vendor's data, it has lost its reason to exist — push the value into computation,
-state, and citation.
-
-## Strategies — the flagship: cheap vol on proven movers
-
-Strategies are **pluggable** (a `Strategy`/screen trait, like the data and broker
-seams), so the engine serves any trader across any asset class. The **flagship
-reference strategy** — the one that ships first and proves the seam — is *cheap
-volatility on proven movers*. Everything below describes that strategy; other
-strategies (momentum, mean-reversion, breakout, pairs, …) plug in the same way and
-carry their own justifying metrics.
-
-**The edge: cheap volatility on proven movers.** We hunt options where implied
-volatility is underpricing future movement — a positive *variance risk premium*
-for the buyer. Concretely, a name qualifies when:
-
-- **IV rank is low** — today's implied vol sits near the bottom of its *own*
-  1–3yr range. (An absolute "IV < 30" is meaningless without this; 30 is cheap
-  for a biotech, rich for a utility.)
-- **Implied < realized** — options imply less movement than the stock has
-  actually been delivering (`realized/implied ≥ 1`).
-- **Proven mover** — the underlying has made multiple large (≥10%) moves over
-  the lookback, so the cheap IV is a genuine mispricing, not a permanently
-  sleepy stock.
-
-Desk shorthand for the setup: *"vol is cheap / options are underpricing the move."*
-This is a **long-vol / long-gamma** posture. We are option **buyers** here.
-
-Vocabulary we use precisely: *entry criteria / setup* (the rule checklist),
-*screen* (the mechanical filter), *investment thesis* (why one specific trade
-makes money — distinct from the reusable screen), *mandate* (what we're allowed
-to trade at all).
+**Why this exists (the three differentiators, ROADMAP §0):**
+(1) **agnostic by ABI** — a new detector, inference technique, or host language is a
+new artifact or SDK behind the frozen contract, zero kernel changes; (2)
+**deterministic, local, private — by construction** — the sandbox exposes no clock,
+no randomness, no network, no filesystem, so an artifact *cannot* be flaky or phone
+home; same input + same artifact = same verdict on every host; (3) **the moat is
+packaging + the feed** — the stable ABI/toolchain, signed content-addressed
+distribution, and (open-core) a continuously retrained artifact feed; the runtime,
+toolchain, and reference detectors stay OSS forever.
 
 ## Repo layout
 
-The engine is **provider-agnostic**: trading logic depends on traits in
-`exub-core`, never a vendor. Swapping a data feed, broker, or AI model is adding
-a crate that implements a trait — not editing the engine. Full plan in `ROADMAP.md`.
-
 ```
 crates/
-  core/         `exub-core` — provider-agnostic contracts. Provider/Capability, ProviderError, and the
-                MarketDataProvider/BrokerProvider/AiProvider traits + mock/paper/echo reference impls. Only
-                dep: async-trait (for the async seams).
-  vol/          Vol math for the flagship strategy — realized vol, IV rank/percentile, spread, moves. No deps.
-  market-data/  Market-data providers implementing core's trait; MockSource (tests) + MassiveSource (stub).
-  store/        Persistent stores implementing core's IvStore — SqliteStore accumulates daily ATM IV so
-                iv_rank is computable across runs (Phase 8, the reason to exist). SQLite via rusqlite bundled.
-  signals/      Pluggable strategies/screens over any MarketDataProvider. Cheap-vol is the flagship reference
-                strategy; more strategies (and other asset classes) plug in behind the same seam.
-  cli/          `exub` binary. `exub scan` runs the screen; `exub providers` lists wired providers.
-xtask/        Dev orchestration — `cargo xtask ci` runs the full local gate. Never shipped.
+  abi/        `agent-abi` — the contract: the Detector ABI (versioned) + the canonical
+              `Verdict` wire type (labels, scores, byte-offset spans, provenance:
+              detector id + semver + threshold + scorecard hash). Serde-stable,
+              #[non_exhaustive], additive-only.
+  host/       `agent-host` — the runtime: wasmtime embedding with fuel metering, memory
+              limits, epoch interruption; deterministic linker (no WASI clocks/random/
+              net/fs); pooled instantiation + module caching. The one engine every
+              surface drives.
+  cli/        the `agent` binary. `agent check` (detect on text/files/stdin), later
+              `agent pull` (signed artifacts) and `agent serve` (loopback sidecar).
+detectors/    artifact SOURCES (Rust → wasm32), one directory per detector, each with
+              an `agent.toml` manifest (budgets, labels) + `cases/` golden verdicts.
+              mock/ is the permanent keyless fixture; secrets/ pii/ injection/ follow.
+xtask/        dev orchestration — `cargo xtask ci` runs the full local gate, including
+              building every detector to wasm and running its goldens. Never shipped.
 ```
-
-## Data sources
-
-- **Massive** — the Rust engine's live data path (`MassiveSource`, reads
-  `MASSIVE_API_KEY`). REST aggregates for bars; options snapshot for IV. Not
-  wired yet — it's the next milestone.
-- **`massive` MCP tools** — live market data available in the Claude Code dev
-  environment (quotes, chains, IVs, historicals). Use `search_endpoints` then
-  `call_api` for any ad-hoc market/price/options lookup while developing —
-  **never web search for financial data.** (This is an *upstream data tool*,
-  distinct from the engine's own future MCP *surface*, which exposes grounded,
-  cited signals rather than raw data — see the AI layer below.)
-
-## The AI layer (MCP — agents bring their own model)
-
-The engine contains **no LLM code**: intelligence connects from the *outside*.
-
-- **Agents drive the engine over MCP** (ROADMAP Phase 17). Claude Code, Gemini
-  CLI, or Codex connect as MCP clients with their own model + key; the engine
-  never reads a model API key. The agent *plans* what to look at; the **engine**
-  fetches + computes + cites the number, so a figure can't be hallucinated — the
-  division of labor is enforced by *absence*, not discipline.
-- **The MCP surface is the AI layer.** `exub serve` publishes scan, evaluate,
-  backtest, structure, and stored IV history (with provenance) as tools, so any
-  agentic assistant calls *our* cited signals instead of crunching raw data.
-- **The desk process is agent-side.** scan → research → thesis → adversarial
-  review is a documented reference workflow orchestrated by the agent over those
-  tools (P17.3); every number in it comes from an engine tool call. The
-  deterministic Finding→structure step is engine code (Phase 18).
-
-There are no bespoke subagents, slash-command skills, or in-engine model
-adapters: the `.claude/` layer was dropped, and the in-engine tool-use
-loop/adapters were cut in favor of MCP (see the Phases 15–16 tombstone). The
-`AiProvider` trait + `EchoAi` mock remain in `exub-core` as a dormant seam only.
 
 ## Guardrails (non-negotiable)
 
-1. **No execution path, by construction.** The engine places no orders — there
-   is no order code to any real venue, and there never will be by drift
-   (ROADMAP Phases 19–22 tombstone). The `BrokerProvider`/`PaperBroker` skeleton
-   in `exub-core` is an inert reference contract; `EXUB_TRADING_MODE` stays
-   `paper` and is vestigial. Reviving execution is an explicit re-scope with its
-   own guardrail design — never a feature to slip in.
-2. **Never commit secrets.** Keys live in `.env` (gitignored). `.env.example`
-   documents the shape. The only keys the engine ever reads are *data-feed*
-   keys — never a model key, never broker credentials.
-3. **No LLM calls from the engine.** The engine computes; agents reason —
-   over MCP, with their own model. If engine code wants to call a model,
-   that's a design smell (see the Phases 15–16 tombstone).
-4. **Finds, never recommends — decision *support*, not advice.** This is the
-   load-bearing principle, not a footnote. The engine *finds* trades:
-   it surfaces candidates and the evidence that justifies them (whatever metrics
-   the strategy uses — for cheap-vol that's IV rank, realized/implied, move
-   history, catalysts), each grounded in fetched data and cited. The engine — not an LLM — authors every figure, so a number can't be
-   hallucinated. Nothing here ever emits a "buy/sell" verdict, a recommendation,
-   or an autonomous action; the human weighs the evidence, decides, places the
-   trade, and owns the risk. If output starts to read as a recommendation rather
-   than cited evidence, that's a bug.
+1. **Detects, never decides.** The kernel returns cited `Verdict`s with lossless
+   spans; block/allow, redaction, routing, and tenant policy live in the embedding
+   host (⟐ operator). Policy code in this repo is a design smell (ROADMAP Phase 11
+   tombstone).
+2. **Deterministic by absence.** The linker exposes nothing beyond the ABI: no
+   clocks, no randomness, no network, no filesystem. An artifact importing anything
+   else fails to load. Never "temporarily" add an import to unblock a detector.
+3. **No LLM code, no model keys.** Detectors are tiny local models inside artifacts;
+   the kernel never calls a model API. LLM-as-judge is someone else's product.
+4. **Measured, not marketed.** Every shipped detector carries a **CI-generated
+   scorecard** (precision/recall on public corpora); hand-written accuracy claims
+   are forbidden; a quality regression fails the gate like an API break.
+5. **No secrets, anywhere.** There is no API key in the detection path by design —
+   a change that needs one is mis-scoped. Fixture corpora contain **synthetic**
+   credentials only, never real ones (not even revoked).
+6. **Artifacts are source.** Detector wasm is built by the gate from in-repo source
+   and signed at release — never hand-committed binaries. Same inputs → same
+   artifact hash.
 
 ## Conventions
 
-- **Rust**, edition 2021, workspace crates. Keep `vol`/`market-data`/`signals`
-  dependency-light so `cargo test --workspace` runs offline and fast.
-- Every new screen/metric ships with unit tests (see `vol` and `signals` for the
-  bar). Pure logic is tested against known inputs, not live data.
-- `cargo test --workspace` and `cargo clippy --workspace` must be green before
-  anything is considered done.
-- Money/vol values are **decimals** internally (0.30 == 30%); format to percent
-  only at the display edge.
-- **Git is human-driven.** The user makes every commit and push; the agent never
-  runs `git commit` / `git push` (or any other CI-triggering action). The agent's
+- **Rust**, stable, one workspace. Keep `agent-abi` dependency-light so the contract
+  is cheap to depend on from anywhere.
+- The wire contract is sacred: `Verdict` JSON field names + exit codes (`0` clean ·
+  `1` detection fired · `2`+ operational error) are golden-tested; evolution is
+  additive-only (new optional fields; never rename/remove/retype).
+- Every detector ships with `cases/` goldens; every metric with known-answer tests.
+  Pure logic is tested against known inputs, never live data.
+- No-panic discipline: `unwrap`/`expect`/`panic!` denied outside tests. A hostile
+  artifact, fuel exhaustion, or malformed input is a typed value that degrades to a
+  clear message.
+- Config is layered **flags > env (`AGENT_*`) > file (TOML) > defaults**; `tracing`
+  logs to stderr; stdout is verdicts only, so `agent check … 2>/dev/null` stays
+  pipe-clean.
+- `cargo xtask ci` must be green before anything is considered done (fmt · clippy
+  `-D warnings` · build · test · docs · feature powerset · deny · artifact goldens —
+  keyless, offline).
+- **Git is human-driven.** The user makes every commit and push; the **coding
+  agent** (Claude, Gemini, Codex — as opposed to `agent`, this project) never runs
+  `git commit` / `git push` (or any other CI-triggering action). The coding agent's
   job ends at: changes made, gate green, roadmap box checked in the working tree,
   and — **only when asked** — a commit message drafted (imperative subject,
   reference the P-ID, never an AI co-author/attribution trailer).
 
 ## Build order (roadmap)
 
-The phase-by-phase plan is the single source of truth in **`ROADMAP.md`** (26
+The phase-by-phase plan is the single source of truth in **`ROADMAP.md`** (13
 sequentially-gated phases; its **checkboxes are the state**). Work it per its §0.5
-agent loop: first unchecked box in ID order, verify-before-building, gate green,
-and the box checked **together with the work** so they land in one commit
-(message references the ID, e.g. `P8.2: …`). The **user** makes that commit —
-the agent leaves the work + checked box staged in the tree and drafts the message
-on request. Never start a phase before the prior one's Exit gate passes. Don't
-duplicate phase status here — update the roadmap.
+working loop: first unchecked box in ID order, one item per iteration, gate green, and
+the box checked **together with the work** so they land in one commit (message
+references the ID, e.g. `P3.2: deterministic linker — no WASI imports`). The
+**user** makes that commit. Never start a phase before the prior one's Exit gate
+passes. The repo's prior contents (a retired trading-engine project) are removed by
+P1.1 — audit nothing, inherit nothing. Don't duplicate phase status here — update
+the roadmap. Hard-to-reverse choices land as dated entries in `ARCHITECTURE.md`.

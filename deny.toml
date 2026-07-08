@@ -19,8 +19,9 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
-    # webpki-roots (Mozilla's CA bundle for rustls, pulled in by the Massive HTTP feature).
-    # A permissive *data* license for the certificate set — not viral, redistribution-clean.
+    # webpki-roots (Mozilla's CA bundle) — a holdover from the retired project's HTTP stack;
+    # ward's core needs no TLS (no network in the detection path). Re-audit and trim this
+    # entry when P1.1 scaffolds the fresh workspace, and again when P10 adds registry pulls.
     "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9

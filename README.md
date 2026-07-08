@@ -1,136 +1,103 @@
-# exuberance
+# agent *(working name)*
 
-A grounded trade-*discovery* engine + AI cockpit for discretionary traders —
-**any market, any strategy. It finds and cites; it never recommends and never
-acts.** A Rust engine whose **data feeds and strategies plug in behind traits** —
-surfaced through a CLI now and an MCP server on the roadmap, so any AI agent can
-call it. The engine contains **no LLM code and no execution path**: agents bring
-their own model over MCP, and you trade in your own brokerage.
+**Guardrail detectors as portable WASM artifacts.** Tiny classifiers — prompt-
+injection, PII, secrets, toxicity — compiled into **signed, content-addressed
+`.wasm` artifacts** that run identically everywhere: embedded in a Rust, Go, or
+Python service via **wasmtime**, in an edge worker, in a proxy hot path, in a
+browser. **It detects and cites; it never decides** — policy stays in your host.
 
-The engine is **strategy- and asset-class-agnostic** (equities, options, futures,
-crypto, FX). Its **flagship reference strategy** — the first that ships and proves
-the seam — is *cheap volatility on proven movers*: find options where implied vol is
-underpricing future movement (low IV rank, implied below realized) on underlyings
-with a demonstrated history of big moves. Other strategies plug in the same way. See
-[`.rules`](.rules) for the full operating manual.
+## Why
 
-## Why this engine exists (vs. Massive's MCP)
+Every LLM application needs guardrails, and today that means either calling a
+hosted classification API (latency, cost, your users' data leaving the process) or
+vendoring a Python service into every stack that needs checking. The guardrail
+market is crowded at the *service* layer — but **nobody ships the detector as a
+portable artifact**. agent's bet: package detection like a codec, not a SaaS.
 
-Massive (and other vendors) already ship an **MCP server** that hands an AI agent
-raw market data — bars, quotes, chains, a live IV snapshot. So why a Rust engine
-instead of just letting Claude Code call that MCP? Because **the edge is a
-computation, not a data lookup — and the data you need doesn't come from one call.**
-
-(Shown with the flagship vol strategy; every point holds for any strategy.)
-
-- **LLMs can't be trusted to compute the signal.** IV rank (where today's IV sits
-  in its *own* 1–3yr range), realized-vs-implied, proven-mover move-counting — exact
-  numbers a real-money decision rests on. A chat model eyeballing them from a data
-  blob approximates or hallucinates. The engine computes them deterministically and
-  **cites the exact inputs** (bars used, history window, provider). The engine
-  authors the number; the model never does.
-- **A strategy needs accumulated state no snapshot returns.** To rank today's IV
-  against its history you need the 1–3yr *series* of daily ATM IV — which a snapshot
-  MCP call doesn't give you. The engine **accumulates and persists** that state; every
-  strategy has state like it, and without the engine you can't compute the signal at
-  all. *This is the concrete reason to exist.*
-- **Scale, schedule, reproducibility, vendor-independence.** Premarket-scan a
-  universe, rank, diff a watchlist, alert; backtest the screen to know the edge is
-  real; do it identically every day across whichever feed is available — Massive
-  today, Alpha Vantage tomorrow — behind one schema, drift caught in CI. A chat
-  session is none of these.
-- **Then it becomes the MCP.** exuberance exposes a *higher-order* tool — "cheap-vol
-  candidates, with cited evidence" — that Claude Code / Gemini CLI / Codex call.
-  Their LLM reasons about *which* trade; the engine supplies the trustworthy,
-  computed signal. Massive's MCP cites nothing; ours cites the number and its
-  provenance.
-
-**In one line:** Massive's MCP gives an agent raw data to (mis)crunch; exuberance
-computes the edge (cheap-vol today, any strategy next) — correctly, statefully,
-reproducibly, vendor-agnostically — and exposes *that* as a grounded tool.
+- **One artifact, every runtime.** A detector is a `.wasm` file implementing a
+  frozen, versioned ABI. The same bytes return the same verdict under wasmtime, at
+  the edge, or in a browser tab — proven by cross-target parity tests, not claimed.
+- **Deterministic, local, private — by construction.** The sandbox exposes no
+  clock, no randomness, no network, no filesystem. An artifact *cannot* be flaky
+  and *cannot* phone home, because the imports don't exist. Detection runs where
+  the data already is; nothing leaves your process.
+- **Measured, not marketed.** Every detector ships with a CI-generated scorecard
+  (precision/recall on public corpora). A quality regression fails CI like an API
+  break.
+- **Contained by design.** The runtime runs artifacts under fuel metering, memory
+  limits, and epoch interruption — a buggy or hostile artifact is a typed error,
+  never a hang.
 
 ## Quick start
 
 ```bash
-cargo test --workspace          # 30 tests, runs offline
-cargo run -p cli -- scan        # demo screen over synthetic data (evidence, not advice)
-cargo run -p cli -- providers   # the plug-in catalog: data feeds, AI models, coding agents, brokers
-cargo xtask ci                  # the full local gate (fmt, clippy, build, test, docs, powerset, deny)
+cargo run -p cli -- check --detector mock "some text to scan"   # keyless, offline, toolless
+cargo run -p cli -- check --detector mock --json < input.txt    # machine output; exit 1 = detection
+cargo xtask ci                                                  # the full local gate
 ```
 
-`exub providers` shows the multi-vendor **plug-in matrix** — every data feed
-(mock, Massive, Alpha Vantage) with `wired`/`planned` status; the AI-model and
-broker entries document *dormant* seams (agents connect over MCP instead, and the
-engine places no orders). Selecting a feed is config (`--data-provider`,
-`EXUB_DATA_PROVIDER`); adding one is a new adapter + one registry arm. The seams
-are `async` so real feeds slot straight in.
+Exit codes are part of the contract: `0` clean · `1` detection fired · `2`+
+operational error — so a CI step or a shell pipeline can gate on agent directly.
+Config is layered **flags > env (`AGENT_*`) > file (TOML) > defaults**. There are
+**no API keys**: the detection path needs none, by design.
 
-Config is layered **flags > env (`EXUB_*`) > file (TOML) > defaults** — e.g.
-`EXUB_DATA_PROVIDER=massive`, `EXUB_TRADING_MODE=paper`, `--config exub.toml`.
-Secrets never live in config: copy `.env.example` → `.env` and add your
-`MASSIVE_API_KEY` (env only) when you wire live data.
+## How it fits together
 
-## The engine (Rust)
+```
+text/stream → agent-host (wasmtime: fuel/memory/epoch, deterministic linker)
+            → detector artifact (.wasm, frozen ABI, embedded weights)
+            → canonical Verdict (labels + scores + spans + provenance)
+```
 
-The engine is **agnostic across four seams**: it talks to market-data feeds,
-brokers, AI models, and strategies only through traits in `exub-core`, so swapping a
-feed, broker, model, or strategy is adding a crate, not editing the engine. The
-agnosticism is a means, not the end: the goal is the most **efficient** way to find
-trades — whatever they are — so the engine is never tied to one data or LLM vendor,
-and can swap or benchmark them head-to-head as better or cheaper ones appear. See
-[`ROADMAP.md`](ROADMAP.md).
+Two contracts carry everything: the **Detector ABI** (what an artifact implements —
+versioned, frozen, inference-technique-agnostic) and the **`Verdict`** wire type
+(what every surface returns — serde-stable, additive-only, golden-tested). The CLI,
+the SDKs (Rust/Go/Python), and the sidecar are pure views over the same runtime and
+must return byte-identical verdicts — a standing parity test proves it.
 
-| Crate | Role |
-|-------|------|
-| `exub-core` | The contract layer: `Provider`/`Capability`, the unified `ProviderError`, the `MarketDataProvider` / `BrokerProvider` / `AiProvider` seams, and the `IvStore` seam + `StoreBackedSource` composition, plus mock/paper/echo reference impls. Only dep: `async-trait`. |
-| `vol` | Vol math for the flagship strategy: realized vol, IV rank/percentile, implied−realized spread, move detection. Fully tested, no deps. |
-| `market-data` | Market-data **providers** implementing `exub-core`'s trait. `MockSource` for tests, `MassiveSource` for live Massive EOD data. |
-| `store` | Persistent **`IvStore`s** — `SqliteStore` accumulates daily ATM IV so `iv_rank` is computable across runs (the reason to exist). |
-| `signals` | Pluggable **strategies/screens** over any `MarketDataProvider`. Cheap-vol is the flagship reference strategy; others plug in behind the same seam. |
-| `cli` | The `exub` binary. `exub scan` runs the screen; `exub providers` lists the wired providers. |
-| `xtask` | Dev orchestration — `cargo xtask ci` runs the full local gate. Never shipped. |
+## Layout
 
-## The AI layer (MCP — agents bring their own model)
+| Path | Role |
+|------|------|
+| `crates/abi` | `agent-abi` — the Detector ABI + the canonical `Verdict` wire type. |
+| `crates/host` | `agent-host` — the wasmtime runtime: sandboxing, determinism, instance pooling. |
+| `crates/cli` | The `agent` binary: `check`, later `pull` and `serve`. |
+| `detectors/` | Artifact **sources** (Rust → wasm32), one per detector, each with a manifest + golden cases. |
+| `xtask` | Dev orchestration — `cargo xtask ci`, including artifact builds + goldens. Never shipped. |
 
-The engine contains **no LLM code**; intelligence connects from the outside:
+## Scope — kernel, not service
 
-- **Agents drive the engine over MCP.** Claude Code, Gemini CLI, or Codex connect
-  as MCP clients with their own model + key — the engine never reads a model key.
-  The agent *plans* what to look at; the **engine** fetches, computes, and cites
-  the number — so a figure can't be hallucinated, *by construction*.
-- **The MCP surface is the AI layer.** `exub serve` (roadmap Phase 17) publishes
-  the grounded discovery capabilities — scan, evaluate, backtest, stored IV
-  history — as tools, so any agentic assistant calls *cited signals* instead of
-  crunching raw data itself.
-- **The desk process is agent-side.** scan → research → thesis → adversarial
-  review is a documented reference workflow the agent orchestrates over those
-  tools; every number in it comes from an engine call. See
-  [`ROADMAP.md`](ROADMAP.md) Phases 17–18.
+**In scope:** detection, the ABI, the runtime, the toolchain that turns tiny models
+into artifacts, signed distribution, and SDKs. **Out of scope, permanently:**
+policy engines (block/allow/redact/route — your host's job, ⟐ the Go `operator`
+suite's product), hosted inference APIs, LLM-as-judge, model training as a service.
+The kernel returns spans precise enough that *you* can redact losslessly; it never
+does it for you.
 
-## Guardrails
+## Open core
 
-The engine contains **no execution path and no LLM calls** — it cannot act and
-cannot fabricate a number, because the code isn't there. You trade in your own
-brokerage. Secrets live in `.env` (gitignored); the only keys the engine reads are
-data-feed keys. This is decision *support* — the human owns the trade and the
-risk. Details in [`.rules`](.rules).
+OSS forever: the runtime, the ABI + toolchain, the CLI/SDKs, and the reference
+detectors with their eval harness. The commercial seam is the **feed**: attacks
+evolve, so continuously retrained detector artifacts — signed, versioned, delivered
+through the same registry protocol the OSS tooling speaks — are the subscription.
+The kernel cannot tell a paid registry from a free one; the feed is additive, never
+required.
 
 ## Roadmap
 
-The arc: vol math + screen → provider-agnostic contracts → config/CI → async seams +
-registry → a real EOD data feed → the IV-history store (the "reason to exist") → the
-`Strategy` seam + backtests → the MCP surface. Deliberately cut along the way:
-in-engine LLM adapters (agents bring their own over MCP) and all broker/execution
-phases (the engine never places orders). The full plan — tombstones included — is in
+The arc: ABI + `Verdict` + mock detector → config/CI gate → the wasmtime host →
+pattern detectors (secrets/PII) → the ML toolchain + injection flagship → the eval
+harness in CI → Rust/Go/Python SDKs → streaming detection → browser/edge parity →
+signed distribution → sidecar → release + benchmark writeup. The full plan — with
+its tombstone (policy in the kernel: cut by design) — is in
 [`ROADMAP.md`](ROADMAP.md); its checkboxes are the **single source of truth** for
 progress.
 
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) — prerequisites, the local gate
-(`cargo xtask ci`), the testing approach, and the invariants (agnostic-by-trait,
-finds-not-recommends, no-panic, secrets-out-of-repo). The operating manual is
-[`.rules`](.rules).
+(`cargo xtask ci`), the testing approach, and the invariants. The operating manual
+is [`.rules`](.rules).
 
 ## License
 
