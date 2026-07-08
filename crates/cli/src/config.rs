@@ -20,8 +20,9 @@ pub struct Config {
     pub data_provider: String,
     /// Which AI adapter to use (e.g. `"mock"`, later `"claude"`).
     pub ai_provider: String,
-    /// Execution mode. Defaults to `"paper"`; `"live"` is only ever reached through the deliberate,
-    /// human-only live gate (see CLAUDE.md guardrail #1) — this field alone never enables real orders.
+    /// Execution mode. Defaults to `"paper"` and is vestigial: the engine contains no execution
+    /// path (see `.rules` guardrail #1 — ROADMAP Phases 19–22 tombstone), so no value of this
+    /// field can place an order. Kept for the dormant broker seam.
     pub trading_mode: String,
     /// The `tracing` filter directive (e.g. `"warn"`, `"debug"`, `"exub=debug"`).
     pub log: String,

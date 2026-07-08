@@ -13,9 +13,11 @@ strategy** — plug in any data feed, AI model, or broker behind a trait — and
 
 - **Rust, stable** ([install `rustup`](https://www.rust-lang.org/tools/install)).
   No nightly, no `sudo`, no codegen step.
-- For **real data/AI** (later milestones): an API key for your chosen feed/model,
-  set via **environment variables** — never committed. For **no keys at all**: the
-  built-in **mock** feed + mock model are the keyless default, so every command
+- For **real data** (later milestones): an API key for your chosen feed, set via
+  **environment variables** — never committed. Data-feed keys are the *only* keys
+  the engine ever reads: it contains no LLM code (agents bring their own model
+  over MCP) and no execution path (no broker credentials, ever). For **no keys at
+  all**: the built-in **mock** feed is the keyless default, so every command
   builds, runs, tests, and demos offline.
 
 ## Quick start
@@ -30,9 +32,10 @@ cargo run -p cli -- providers   # the plug-in catalog: data feeds, AI models, co
 ```
 
 Config is layered **flags > env (`EXUB_*`) > file (TOML) > defaults**; `mock` is the
-keyless default. Pick adapters with `--data-provider` / `--ai-provider` (or the
-`EXUB_*` vars / a `--config` TOML). Secrets come from **provider-native env vars
-only** (`MASSIVE_API_KEY`, `ANTHROPIC_API_KEY`, …), never the config file.
+keyless default. Pick a feed with `--data-provider` (or the `EXUB_*` vars / a
+`--config` TOML). Secrets come from **provider-native env vars only**
+(`MASSIVE_API_KEY`, `ALPHA_VANTAGE_API_KEY`, …), never the config file — and only
+data-feed keys exist; the engine reads no model or broker credentials.
 
 ## Before you push — the local gate
 
@@ -64,7 +67,7 @@ Almost everything runs **offline, with no API keys**, via the mock adapters:
 1. **Unit / pure:** vol math, screen logic, config precedence, adapter mappings,
    format helpers — table-driven, no network.
 2. **Contract tests (recorded fixtures):** each real adapter (as they land) replays
-   a captured provider/LLM response, so its raw→canonical mapping is deterministic
+   a captured provider response, so its raw→canonical mapping is deterministic
    and **API drift fails CI**, not a live scan.
 3. **Known-answer / grounding evals:** verifiable inputs → asserted outputs, plus a
    check that a surfaced `Finding` is backed by the data it cites. The honesty

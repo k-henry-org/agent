@@ -2,8 +2,10 @@
 
 A grounded trade-*discovery* engine + AI cockpit for discretionary traders —
 **any market, any strategy. It finds and cites; it never recommends and never
-acts.** A Rust engine whose **data feeds, strategies, AI models, and brokers all
-plug in behind traits**, with an MCP surface.
+acts.** A Rust engine whose **data feeds and strategies plug in behind traits** —
+surfaced through a CLI now and an MCP server on the roadmap, so any AI agent can
+call it. The engine contains **no LLM code and no execution path**: agents bring
+their own model over MCP, and you trade in your own brokerage.
 
 The engine is **strategy- and asset-class-agnostic** (equities, options, futures,
 crypto, FX). Its **flagship reference strategy** — the first that ships and proves
@@ -57,11 +59,11 @@ cargo xtask ci                  # the full local gate (fmt, clippy, build, test,
 ```
 
 `exub providers` shows the multi-vendor **plug-in matrix** — every data feed
-(mock, Massive, Alpha Vantage), AI model (Claude, Gemini, OpenAI), coding
-agent (Claude Code, Gemini CLI, Codex), and broker — with `wired`/`planned`
-status. Selecting one is config (`--data-provider`, `EXUB_DATA_PROVIDER`); adding
-one is a new adapter + one registry arm. The seams are `async` so real feeds and
-models slot straight in.
+(mock, Massive, Alpha Vantage) with `wired`/`planned` status; the AI-model and
+broker entries document *dormant* seams (agents connect over MCP instead, and the
+engine places no orders). Selecting a feed is config (`--data-provider`,
+`EXUB_DATA_PROVIDER`); adding one is a new adapter + one registry arm. The seams
+are `async` so real feeds slot straight in.
 
 Config is layered **flags > env (`EXUB_*`) > file (TOML) > defaults** — e.g.
 `EXUB_DATA_PROVIDER=massive`, `EXUB_TRADING_MODE=paper`, `--config exub.toml`.
@@ -72,7 +74,10 @@ Secrets never live in config: copy `.env.example` → `.env` and add your
 
 The engine is **agnostic across four seams**: it talks to market-data feeds,
 brokers, AI models, and strategies only through traits in `exub-core`, so swapping a
-feed, broker, model, or strategy is adding a crate, not editing the engine. See
+feed, broker, model, or strategy is adding a crate, not editing the engine. The
+agnosticism is a means, not the end: the goal is the most **efficient** way to find
+trades — whatever they are — so the engine is never tied to one data or LLM vendor,
+and can swap or benchmark them head-to-head as better or cheaper ones appear. See
 [`ROADMAP.md`](ROADMAP.md).
 
 | Crate | Role |
@@ -84,33 +89,39 @@ feed, broker, model, or strategy is adding a crate, not editing the engine. See
 | `cli` | The `exub` binary. `exub scan` runs the screen; `exub providers` lists the wired providers. |
 | `xtask` | Dev orchestration — `cargo xtask ci` runs the full local gate. Never shipped. |
 
-## The AI layer (in the engine)
+## The AI layer (MCP — agents bring their own model)
 
-The AI layer lives **inside the engine**, not as tool-specific personas:
+The engine contains **no LLM code**; intelligence connects from the outside:
 
-- **Model + agent adapters behind one seam.** Any LLM (Claude, Gemini, OpenAI) and
-  any coding agent (Claude Code, Gemini CLI, Codex) plug in behind `AiProvider`,
-  selected by config. The model *plans* a query; the **engine** fetches, computes,
-  and cites the number — so a figure can't be hallucinated.
-- **Exposed via MCP.** The engine will publish its grounded discovery capabilities
-  (scan, evaluate, backtest) as an MCP tool-server, so any agentic assistant calls
-  *cited signals* instead of crunching raw data itself.
-- **The desk process as a cited pipeline.** scan → research → thesis → risk-check →
-  adversarial review becomes a reproducible, logged, cited engine pipeline —
-  harness-agnostic. See [`ROADMAP.md`](ROADMAP.md) Phases 15–18.
+- **Agents drive the engine over MCP.** Claude Code, Gemini CLI, or Codex connect
+  as MCP clients with their own model + key — the engine never reads a model key.
+  The agent *plans* what to look at; the **engine** fetches, computes, and cites
+  the number — so a figure can't be hallucinated, *by construction*.
+- **The MCP surface is the AI layer.** `exub serve` (roadmap Phase 17) publishes
+  the grounded discovery capabilities — scan, evaluate, backtest, stored IV
+  history — as tools, so any agentic assistant calls *cited signals* instead of
+  crunching raw data itself.
+- **The desk process is agent-side.** scan → research → thesis → adversarial
+  review is a documented reference workflow the agent orchestrates over those
+  tools; every number in it comes from an engine call. See
+  [`ROADMAP.md`](ROADMAP.md) Phases 17–18.
 
 ## Guardrails
 
-Execution defaults to **paper**. No live orders without an explicit human go.
-Secrets live in `.env` (gitignored). This is decision *support* — the human owns
-the trade and the risk. Details in [`.rules`](.rules).
+The engine contains **no execution path and no LLM calls** — it cannot act and
+cannot fabricate a number, because the code isn't there. You trade in your own
+brokerage. Secrets live in `.env` (gitignored); the only keys the engine reads are
+data-feed keys. This is decision *support* — the human owns the trade and the
+risk. Details in [`.rules`](.rules).
 
 ## Roadmap
 
 The arc: vol math + screen → provider-agnostic contracts → config/CI → async seams +
-registry → live data feeds → the IV-history store (the "reason to exist") → the
-in-engine AI layer + MCP surface → guarded paper execution. The full 26-phase plan is
-in [`ROADMAP.md`](ROADMAP.md) — its checkboxes are the **single source of truth** for
+registry → a real EOD data feed → the IV-history store (the "reason to exist") → the
+`Strategy` seam + backtests → the MCP surface. Deliberately cut along the way:
+in-engine LLM adapters (agents bring their own over MCP) and all broker/execution
+phases (the engine never places orders). The full plan — tombstones included — is in
+[`ROADMAP.md`](ROADMAP.md); its checkboxes are the **single source of truth** for
 progress.
 
 ## Contributing

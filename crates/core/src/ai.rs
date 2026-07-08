@@ -1,10 +1,12 @@
 //! The [`AiProvider`] contract + an echo mock.
 //!
-//! One seam for every reasoning backend — raw models (Claude, Gemini, OpenAI)
-//! and their coding agents — so the engine never hard-wires one vendor. The
-//! trait is minimal: a completion in, a completion out, plus a capability card
-//! so callers know whether tool-use or streaming is on offer. Concrete
-//! providers land in their own crate (ROADMAP Phase 16).
+//! A **designed-but-dormant seam** (see the ROADMAP Phases 15–16 tombstone):
+//! the engine contains no LLM code and never reads a model API key — agents
+//! (Claude Code, Gemini CLI, Codex) connect from the outside over MCP (ROADMAP
+//! Phase 17) and bring their own model. The trait is kept minimal — a completion
+//! in, a completion out, plus a capability card — so if in-engine model calls
+//! are ever explicitly re-scoped, the contract already exists. Only the `EchoAi`
+//! mock implements it.
 
 use async_trait::async_trait;
 

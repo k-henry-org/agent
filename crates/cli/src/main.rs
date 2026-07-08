@@ -35,7 +35,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     ai_provider: Option<String>,
 
-    /// Execution mode: `paper` (default) or `live`. Live also requires the human-only live gate.
+    /// Execution mode: `paper` (default). Vestigial — the engine places no orders (see .rules
+    /// guardrail #1); kept for the dormant broker seam.
     #[arg(long, global = true, value_name = "MODE")]
     trading_mode: Option<String>,
 

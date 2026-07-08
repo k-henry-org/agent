@@ -9,11 +9,14 @@ an edge — and the engine surfaces candidates plus the evidence that justifies 
 in real data with its provenance, so *you* decide. Decision **support**, never advice, never
 autonomous execution.
 
-The shape is **ports & adapters** (hexagonal): a headless **engine** drives three external
-I/O ports — `MarketDataProvider`, `AiProvider`, and (later, guarded) `BrokerProvider` — and
-runs a pluggable **`Strategy`** (the fourth agnostic seam; internal, not I/O) over canonical
-data. Every **surface** (the `exub` CLI now; MCP and an optional API later) only *renders*
-what the engine found — no surface calls a feed, a model, a broker, or a strategy directly.
+The shape is **ports & adapters** (hexagonal): a headless **engine** drives one external
+I/O port — `MarketDataProvider` — and runs a pluggable **`Strategy`** (the second agnostic
+seam; internal, not I/O) over canonical data. The `AiProvider` and `BrokerProvider` traits
+exist in `exub-core` as **designed-but-dormant contracts**: intelligence connects from the
+*outside* over MCP — agents bring their own LLM, the engine contains **no LLM code** — and
+execution is **cut by design** (the Phases 19–22 tombstone: the engine places no orders,
+ever). Every **surface** (the `exub` CLI now; the MCP server later) only *renders* what the
+engine found — no surface calls a feed or a strategy directly.
 The cheap-vol / proven-mover screen is the **flagship reference strategy**, not the product:
 momentum, mean-reversion, breakout — over equities, futures, crypto, FX — plug into the same
 seam. The operating manual is [`.rules`](./.rules); hard-to-reverse decisions land in
@@ -21,19 +24,28 @@ seam. The operating manual is [`.rules`](./.rules); hard-to-reverse decisions la
 
 Three keystones hold it up:
 
-1. **Agnostic by trait, never by vendor.** A new feed, model, broker, or strategy is a **new
-   adapter behind a trait and nothing else**; the core depends on none of them. Adapters are
-   feature-gated so a lean build compiles without every vendor SDK. The registry is the one
-   place a vendor is named: config resolves a name → a boxed adapter; capabilities are
-   declared (`Capability`), and the engine only plans a query a provider can answer. If a
-   change makes the core name a vendor, the design is wrong.
+1. **Agnostic by trait, never by vendor — because lock-in caps the search.** The goal is
+   the most *efficient* way to find trades, whatever they are — and that search must stay
+   free to swap, combine, and benchmark data feeds and models head-to-head as better,
+   cheaper, or faster ones appear. So: a new feed, model, broker, or strategy is a **new
+   adapter behind a trait and nothing else**; the core depends on none of them. Adapters
+   are feature-gated so a lean build compiles without every vendor SDK. The registry is the
+   one place a vendor is named: config resolves a name → a boxed adapter; capabilities are
+   declared (`Capability`), and the engine only plans a query a provider can answer. Because
+   every vendor answers the same seam, the same question can be run over two feeds and the
+   results *compared* — the backtest (Phase 13) and evals (Phase 14) turn "which provider
+   finds trades best" into a measurement, not an allegiance. And because intelligence
+   connects over MCP instead of living in the engine, the LLM is the most swappable piece
+   of all: any agent, any model, zero engine changes and zero model keys. If a change makes
+   the core name a vendor, the design is wrong.
 2. **Grounded discovery, never advice.** The engine answers from data it actually fetched,
    **authors every figure itself** (IV rank, realized/implied, move counts — never the LLM),
    and reports provenance: metric, value, the exact bars/IV history used, the provider. It
    surfaces *candidates + evidence*, never a verdict, and no layer ever emits "buy this."
-   The guardrails are types + tests, not convention: execution defaults to paper
-   (`EXUB_TRADING_MODE=paper`), a mechanical risk check fronts anything resembling a trade,
-   going live is a deliberate multi-step human act, and secrets never enter the repo.
+   The guardrails are structural, not convention: the engine contains **no execution path**
+   (no order code to any real venue exists — the `PaperBroker` is an inert reference mock)
+   and **no LLM code** — it cannot act, cannot recommend on a model's behalf, and cannot
+   hallucinate a number, *because the code isn't there*. Secrets never enter the repo.
 3. **The differentiator is what the engine computes and keeps — never raw access.** Massive
    (and others) already expose raw market data to agents over MCP, so raw access is not a
    reason to build. The engine earns its existence three ways: **(a)** deterministic, cited
@@ -48,9 +60,11 @@ Three keystones hold it up:
 
 The discipline test for every step: *"does this make discovery more grounded — more computed
 by the engine, better cited, more strategy- and vendor-agnostic — without recommending,
-acting, or naming a vendor in the core?"* If no, it sinks to a later phase. **The mock feed +
-mock model keep every phase keyless and offline-testable.** We do not start a phase until the
-one before it is green on the gate.
+acting, or naming a vendor in the core?"* If no, it sinks to a later phase — or out entirely:
+this roadmap was **deliberately cut down** (2026-07) to the smallest set of phases that
+reaches both reasons to exist; the tombstones (2, 15–16, 19–22) record what was cut and why.
+**The mock feed keeps every phase keyless and offline-testable.** We do not start a phase
+until the one before it is green on the gate.
 
 ---
 
@@ -118,10 +132,11 @@ screen offline with no API keys.
 ## Phase 2 — AI layer (subagents + skills) — dropped
 A tombstone, not work. The `.claude/` subagent squad + slash-command skills were **removed**:
 harness-specific convenience, not part of the defensible engine. Their value (the research →
-thesis → risk → adversarial-review *process*) lives in the in-engine AI layer, Phases 15–18.
-The `#2` slot is kept only so later phase numbers — and the cross-references in code, docs,
-and commit history that cite them — don't shift. Do not recreate them as `.claude/` files;
-put the value in the engine.
+thesis → risk → adversarial-review *process*) lives **agent-side**, orchestrated over the
+engine's MCP tools (Phase 17); the deterministic Finding→structure step is Phase 18. The
+`#2` slot is kept only so later phase numbers — and the cross-references in code, docs, and
+commit history that cite them — don't shift. Do not recreate them as `.claude/` files; put
+the value in the engine.
 
 **Exit gate:** none — nothing to verify. Proceed to Phase 3.
 
@@ -137,9 +152,11 @@ vendor-specific anywhere.
 - [ ] **P3.2** A unified `ProviderError` (NotFound / Auth / RateLimited / Transport /
       Unsupported / Refused / NotImplemented): every failed provider call is a typed value
       that degrades to a clear message.
-- [ ] **P3.3** The three I/O seams — `MarketDataProvider` (daily bars + IV snapshot),
-      `BrokerProvider` (account, orders, `TradingMode`), `AiProvider` (prompt → completion).
-      The fourth agnostic seam, `Strategy`, is internal and lands in Phase 11.
+- [ ] **P3.3** The three I/O seams — `MarketDataProvider` (daily bars + IV snapshot; the
+      one *active* port), plus `BrokerProvider` and `AiProvider` verified as
+      **designed-but-dormant contracts**: no phase wires real vendors to them (see the
+      Phase 15–16 and 19–22 tombstones). The other agnostic seam, `Strategy`, is internal
+      and lands in Phase 11.
 - [ ] **P3.4** Reference impls proving the seams: `PaperBroker` + `EchoAi` in `exub-core`,
       the `MockSource` feed in `market-data` — and the dependency direction enforced:
       `market-data` + `signals` depend on the traits, never a concrete vendor.
@@ -177,13 +194,13 @@ mock-only (cheap now, expensive after a live adapter exists).
 - [ ] **P5.2** The **registry** — the one place a vendor is named: config name → boxed
       adapter (`build_data_provider` / `build_ai_provider`); selecting a planned-but-unwired
       vendor is a clear, actionable error, never a silent fallback.
-- [ ] **P5.3** The plug-in **catalog** (`exub providers`): every intended data feed, AI
-      model, coding agent, and broker with wired/planned status. Coding agents (Claude Code,
-      Gemini CLI, Codex) ride the `AiProvider` seam as `ProviderKind::Agent` +
-      `Capability::CodingAgent` — no separate trait.
-- [ ] **P5.4** Stream screen results / answers to a `TokenSink`-style surface as they're
-      found; `--json` stays atomic. (Expected to land with the AI-driven `ask` loop — if it
-      moves to Phase 15, record the move per §0.5.)
+- [ ] **P5.3** The plug-in **catalog** (`exub providers`): every intended data feed with
+      wired/planned status. The AI-model / coding-agent / broker entries document the
+      **dormant seams** — permanently `planned` unless explicitly re-scoped (see the
+      Phase 15–16 and 19–22 tombstones); agents connect over MCP instead.
+- [ ] **P5.4** Stream scan results to the surface as they're found (useful once real feeds
+      make a universe scan slow); `--json` stays atomic. Streams `Finding`s, never model
+      tokens.
 
 **Exit gate:** all P5 boxes checked · `cargo xtask ci` green · `exub providers` renders the
 catalog; a planned vendor errors actionably; the screen runs through a `Box<dyn …>` chosen
@@ -198,9 +215,10 @@ decided once — before real adapters multiply the cost of changing them.
       breaking downstream matches or struct literals.
 - [ ] **P6.2** (decision) **f64 for stats, decimal at the money edge:** prices/vols stay
       `f64` — the correct representation for statistical vol math (log returns, stddev,
-      ranks); exact decimal money is reserved for the order/broker edge (Phase 19), *not*
-      the vol pipeline. Timestamps stay epoch-seconds **UTC** (market close); a typed time
-      crate isn't worth the dependency yet.
+      ranks); exact decimal money would belong at an order/broker edge, which is **cut by
+      design** (if execution is ever re-scoped, decimal money comes with it). Timestamps
+      stay epoch-seconds **UTC** (market close); a typed time crate isn't worth the
+      dependency yet.
 - [ ] **P6.3** `ProviderError` grown to the structured set incl.
       `RateLimited { retry_after }`; the **no-panic lint** (`unwrap_used` / `expect_used`
       denied outside tests via workspace lints + `clippy.toml`) — production code is
@@ -210,13 +228,15 @@ decided once — before real adapters multiply the cost of changing them.
 type compiles downstream crates without edits (the constructors + `#[non_exhaustive]` prove
 it).
 
-## Phase 7 — Massive market-data provider
-Goal: the first real feed, behind the same trait. **Plumbing, per §0 keystone 3** — on its
-own this is raw access (what a vendor's MCP already offers); its payoff is Phases 8 + 17
-built on top. Do not treat wiring it as the product.
+## Phase 7 — First real data adapter (EOD)
+Goal: the first real feed, behind the same trait — **end-of-day only**. A discovery engine
+needs a once-a-day fetch of daily bars + a daily IV observation; it never needs streaming,
+websockets, or intraday data (real-time is an *execution* concern, and execution is cut).
+**Plumbing, per §0 keystone 3** — on its own this is raw access (what a vendor's MCP already
+offers); its payoff is Phases 8 + 17 built on top. Do not treat wiring it as the product.
 
-- [ ] **P7.1** `MassiveSource` behind a `massive-live` feature: REST aggregates →
-      `daily_bars`; options snapshot → `iv_snapshot` (ATM / 30-day IV). Key from
+- [ ] **P7.1** `MassiveSource` behind a `massive-live` feature: **EOD** REST aggregates →
+      `daily_bars`; end-of-day options snapshot → `iv_snapshot` (ATM / 30-day IV). Key from
       `MASSIVE_API_KEY` (env only, held in `secrecy::SecretString` at the adapter edge).
 - [ ] **P7.2** **Data correctness (the #1 bug class):** explicit adjusted-vs-unadjusted
       handling for splits/dividends (realized vol on unadjusted prices is *wrong*),
@@ -270,8 +290,8 @@ fills — plus the caching/fan-out layer that brutal free-tier rate limits make 
       Respect each source's redistribution terms.
 - [ ] **P9.4** An **events / catalysts capability** (earnings dates, corporate events) as a
       distinct `Capability` behind the provider seam — served by **Financial Modeling Prep
-      (or Finnhub)**. Feeds the proven-mover context *and* the Phase-21 earnings-landmine
-      check.
+      (or Finnhub)**. Feeds the proven-mover context *and* the strategy-level
+      earnings-proximity filter (P12.3).
 
 *(Further candidates as coverage demands: Databento and Twelve Data for broad multi-asset
 incl. futures/crypto/FX; Tradier/Alpaca/IBKR dual-use with their broker credentials. Skip
@@ -281,20 +301,23 @@ IEX Cloud — shut down 2024.)*
 over two real feeds; a rate-limited feed completes a universe scan through the cache.
 
 ## Phase 10 — Universe & symbology
-Goal: scan real universes, not a hardcoded demo list — across asset classes, with symbols
-normalized so providers agree on what a thing is called.
+Goal: scan real universes, not a hardcoded demo list — **equities + listed options first**;
+other asset classes only when a strategy actually demands them.
 
-- [ ] **P10.1** Real universe input for `exub scan`: index constituents, sector ETFs, custom
-      lists, and non-equity universes; liquidity pre-filters so illiquid names don't waste
-      the request budget.
-- [ ] **P10.2** A symbology layer normalizing tickers, option (OCC), futures, and crypto
-      symbols across providers and asset classes.
-- [ ] **P10.3** Extend the canonical schema where non-equity assets need it (futures roll /
-      continuous contracts, crypto 24/7 sessions, FX without volume) — additively, via the
-      Phase-6 `#[non_exhaustive]` types.
+- [ ] **P10.1** Real universe input for `exub scan`: index constituents, sector ETFs, and
+      custom lists; liquidity pre-filters so illiquid names don't waste the request budget.
+- [ ] **P10.2** A symbology layer normalizing equity tickers and option (OCC) symbols
+      across providers.
 
-**Exit gate:** all P10 boxes checked · `cargo xtask ci` green · a scan over a named universe
-(e.g. an index's constituents) runs end-to-end with liquidity pre-filtering.
+**Deferred — not part of this phase's exit gate; pick up only when a concrete strategy
+demands the asset class:**
+- [ ] **P10.D1** Futures / crypto / FX symbology, and the canonical-schema extensions those
+      assets need (futures roll / continuous contracts, crypto 24/7 sessions, FX without
+      volume) — additively, via the Phase-6 `#[non_exhaustive]` types.
+
+**Exit gate:** P10.1–P10.2 checked (P10.D* excluded) · `cargo xtask ci` green · a scan over
+a named universe (e.g. an index's constituents) runs end-to-end with liquidity
+pre-filtering.
 
 ## Phase 11 — Engine orchestrator + Strategy seam + cited `Finding`
 Goal: where "all traders" becomes real — the headless `Engine` §0 promises, and the
@@ -302,15 +325,22 @@ Goal: where "all traders" becomes real — the headless `Engine` §0 promises, a
 the flagship *reference implementation*, not the hard-coded point.
 
 - [ ] **P11.1** The **`Engine`** — the headless orchestrator: owns the runtime-selected data
-      provider (and later AI/broker) + the chosen `Strategy`, runs the screen/compute, and
-      returns a cited result. The one object every surface drives — the CLI now, the
-      tool-use loop (Phase 15), the MCP server (Phase 17). Today "the engine" is
-      `signals::scan`; this makes it real, and it is a prerequisite for Phases 15–18.
-- [ ] **P11.2** The **`Strategy` trait** (the fourth agnostic seam, alongside data / AI /
-      broker): canonical data in → cited **`Finding`s** out — symbol + strategy + the
+      provider + the chosen `Strategy`, runs the screen/compute, and returns a cited
+      result. The one object every surface drives — the CLI now, the MCP server (Phase 17).
+      Today "the engine" is `signals::scan`; this makes it real, and it is the prerequisite
+      for Phase 17.
+- [ ] **P11.2** The **`Strategy` trait** (the second agnostic seam, alongside market data):
+      canonical data in → cited **`Finding`s** out — symbol + strategy + the
       metrics that justify it + provenance. The cheap-vol screen becomes its first impl;
       `CheapVolResult` generalizes to `Finding`, so an equity setup, an option structure,
-      or a futures spread all surface the same way.
+      or (later) a futures spread all surface the same way. **Design `Finding` as a wire
+      type from day one:** it will be serialized by `--json` (P11.3), the MCP server
+      (Phase 17), and any future programmatic surface — so extend the Phase-6 discipline
+      (`#[non_exhaustive]` + constructors) with **serde-stable field naming**: explicit
+      `#[serde(rename_all = "...")]` chosen deliberately, additive-only evolution (new
+      fields optional with defaults, never renamed/removed/retyped), and a round-trip test
+      pinning the JSON shape. Cheap to decide here; a breaking wire change after agents
+      script against it is not.
 - [ ] **P11.3** JSON + table output for `exub scan`, sortable/filterable — a
       machine-readable, cited evidence set, never a verdict.
 
@@ -323,11 +353,17 @@ to do with vol, proving the engine is for all traders.
 
 - [ ] **P12.1** Deepen the flagship's vol math beyond ATM: term structure, skew,
       front-vs-back — each metric a pure, tested function in `vol`.
-- [ ] **P12.2** (epic) **Non-vol strategies** on the same seam — momentum, mean-reversion,
-      breakout, pairs — across asset classes; each a pure, tested `Strategy` impl.
+- [ ] **P12.2** **One non-vol strategy** (momentum or breakout) on the same seam — the
+      proof the seam is real. The library then grows *organically*: a new strategy is a new
+      `Strategy` impl + tests, never a roadmap phase.
+- [ ] **P12.3** Strategy-level **context filters**: earnings-date proximity (via the
+      Phase-9 events capability) and liquidity — the useful residue of the cut risk engine
+      (Phases 19–22), reframed as *discovery context* ("this cheap vol is an earnings
+      landmine"), not execution risk.
 
-**Exit gate:** all P12 boxes checked · `cargo xtask ci` green · at least one non-vol strategy
-surfaces cited `Finding`s over the same engine and data the flagship uses.
+**Exit gate:** all P12 boxes checked · `cargo xtask ci` green · a non-vol strategy surfaces
+cited `Finding`s over the same engine and data the flagship uses · a `Finding` inside an
+earnings window carries that context in its evidence.
 
 ## Phase 13 — Backtest harness
 Goal: measure whether a strategy's findings actually realize — offline, reproducible, over
@@ -353,109 +389,68 @@ every surfaced finding proven to be backed by the data it cites.
 **Exit gate:** all P14 boxes checked · `cargo xtask ci` green · the grounding check is a
 standing CI test that would fail on a fabricated or drifted figure.
 
-## Phase 15 — AiProvider seam depth (tool-use loop)
-Goal: grow the AI seam from prompt→completion into a tool-use loop where the model *plans*
-and the **engine computes** — the division of labor that keeps numbers unhallucinatable.
+## Phases 15–16 — ~~In-engine AI layer (tool-use loop + model adapters)~~ — cut
+A tombstone (re-scoped 2026-07). The MCP surface (Phase 17) **inverts the plan**: instead of
+the engine driving an LLM through an in-engine tool-use loop, **agents drive the engine** —
+Claude Code / Gemini CLI / Codex connect as MCP clients and bring their own model. The
+division of labor is identical (the model plans *what to look at*; the engine fetches,
+computes, and cites), but the engine now contains **zero LLM code** and never reads a model
+API key. That's a strictly better trade: every model/agent vendor stays swappable (keystone
+1) with nothing to maintain, and "the engine authors the number" is enforced by *absence*
+rather than discipline. The `AiProvider` trait + `EchoAi` mock stay in `exub-core` as a
+designed-but-dormant seam; the registry's model/agent entries stay `planned` as
+documentation. Reviving in-engine model calls is an explicit re-scope, not a drift. The
+`#15–16` slots are kept so phase numbers don't shift.
 
-- [ ] **P15.1** A tool-use loop on `AiProvider`: the model plans a query, the **engine runs
-      it** (fetch + compute + cite) — the model chooses *what to look at*, never authors a
-      number.
-- [ ] **P15.2** Streaming, token accounting, and model selection on the same seam.
+**Exit gate:** none — nothing to verify. Proceed to Phase 17.
 
-**Exit gate:** all P15 boxes checked · `cargo xtask ci` green · a mock-model tool-use round
-trip: plan → engine computes → cited answer, fully offline.
-
-## Phase 16 — Real AI adapters (Claude, then others)
-Goal: the first real `AiProvider`s, contract-tested like any other adapter — the seam proven
-by a second vendor, not just designed for one.
-
-- [ ] **P16.1** An Anthropic adapter (tool-use, streaming), feature-gated, key from
-      `ANTHROPIC_API_KEY`; **contract tests over recorded completions** so model-API drift
-      fails CI.
-- [ ] **P16.2** A second model (Gemini / OpenAI / local) on the same seam — the proof the
-      seam is real. Coding agents keep riding `AiProvider` as `ProviderKind::Agent`.
-
-**Exit gate:** all P16 boxes checked · `cargo xtask ci` green offline · with a key set
-locally, the tool-use loop answers a discovery question through a real model with every
-figure engine-authored.
-
-## Phase 17 — Engine ↔ agent bridge + MCP surface
+## Phase 17 — The MCP surface (the AI layer)
 Goal: **the reason to exist** (§0 keystone 3c) — the engine becomes a higher-order MCP, the
 mirror of a vendor's raw-data MCP: theirs hands over raw bars and cites nothing; ours returns
-grounded candidates with provenance.
+grounded candidates with provenance. Since Phases 15–16 were cut, this *is* the AI layer:
+agents bring the intelligence, the engine brings the numbers.
 
-- [ ] **P17.1** Expose the engine's discovery capabilities (scan, evaluate, backtest) as
-      **MCP tools** that agentic assistants (Claude Code, Gemini CLI, Codex) call — *their*
-      LLM reasons about which trade; *our* engine screens, computes, and **cites** the
-      number.
+- [ ] **P17.1** Expose the engine's discovery capabilities (scan, evaluate, backtest, and
+      the stored IV history with provenance) as **MCP tools** — an `exub serve` command —
+      that agentic assistants (Claude Code, Gemini CLI, Codex) call: *their* LLM reasons
+      about which trade; *our* engine screens, computes, and **cites** the number.
 - [ ] **P17.2** The MCP tool-server is another pure view over the same `Engine` (no logic of
       its own); the `massive` MCP remains a possible upstream feed, never a competitor.
+- [ ] **P17.3** Document a **reference agent workflow** — scan → research → thesis →
+      adversarial review, orchestrated *agent-side* over these tools (the desk process the
+      dropped Phase-2 skills sketched, now living where the LLM lives). Documentation, not
+      engine code; every number in it comes from an engine tool call.
 
 **Exit gate:** all P17 boxes checked · `cargo xtask ci` green · an MCP client calls a scan
-tool and receives cited `Finding`s identical to the CLI's for the same question.
+tool and receives cited `Finding`s identical to the CLI's for the same question · the
+reference workflow runs end-to-end with every figure traceable to a tool call.
 
-## Phase 18 — Thesis & decision-support pipeline as code
-Goal: the desk process the dropped Phase-2 skills once sketched, now *in the engine* and
-harness-agnostic — evidence in, a stress-tested thesis out, every step recorded and cited.
-Still support, never a call: the human decides.
+## Phase 18 — Finding → tradeable structure
+Goal: the deterministic last mile — turn a candidate into the concrete structure a thesis
+rests on. (The research/thesis/review *process* around it is agent-side, P17.3; this phase
+is only the math the engine must own.) Still support, never a call: the human decides.
 
-- [ ] **P18.1** A reproducible, logged **scan → research → thesis → risk-check →
-      adversarial-review** pipeline; every step records its inputs, outputs, and citations.
-- [ ] **P18.2** **Finding → concrete trade:** turn a candidate into the tradeable structure
-      the thesis rests on — for the vol flagship, the option structure (strike/expiry) with
-      cost + breakeven; for other strategies, the instrument + entry/stop. A `Finding` names
-      *what's mispriced*; this names *what you'd trade* — and still never whether to.
+- [ ] **P18.1** **Finding → concrete trade structure:** for the vol flagship, the option
+      structure (strike/expiry) with cost + breakeven; for other strategies, the instrument
+      + entry/stop. A `Finding` names *what's mispriced*; this names *what you'd trade* —
+      and still never whether to. Pure, tested, cited like every other figure; exposed to
+      the CLI and as an MCP tool.
 
-**Exit gate:** all P18 boxes checked · `cargo xtask ci` green · one candidate runs the full
-pipeline offline, producing a logged, cited, adversarially-reviewed thesis document.
+**Exit gate:** all P18 boxes checked · `cargo xtask ci` green · a flagship `Finding`
+resolves offline to a concrete structure with cost + breakeven, cited to its inputs.
 
-## Phase 19 — Broker seam hardening
-Goal: *(execution is not the product — discovery is. Phases 19–22 exist only so a trade
-**you** decided on can route to **any** broker, under the §0 guardrails. The engine never
-places or suggests placing a trade.)* Grow the broker contract from skeleton to
-venue-neutral surface.
+## Phases 19–22 — ~~Broker seam, sandbox fills, risk engine, live gate~~ — cut by design
+A tombstone (re-scoped 2026-07) — and a *strengthening* one: the engine now contains **no
+execution path at all**. "Finds, never recommends, never acts" is guaranteed **by absence**:
+there is no order code to guard, so four phases of live-gate/risk-veto apparatus protect
+nothing and are gone. You trade in your own brokerage; the engine's job ends at cited
+evidence. What survives: the `BrokerProvider` trait + `PaperBroker` mock stay in `exub-core`
+as an inert reference seam (P3.3/P3.4 verify them as *contracts*, nothing more), and the
+earnings-landmine check became a strategy-level context filter (P12.3). Reviving execution
+is an explicit re-scope with its own guardrail design — never a feature to drift into. The
+`#19–22` slots are kept so phase numbers don't shift.
 
-- [ ] **P19.1** Grow `BrokerProvider`: positions, open orders, cancel/replace, multi-leg
-      option orders — venue-neutral, capability-declared.
-- [ ] **P19.2** A `TradingMode` that is *structurally* impossible to flip to live without an
-      explicit human acknowledgement — enforced by types + tests, not convention.
-
-**Exit gate:** all P19 boxes checked · `cargo xtask ci` green · a test proves live mode is
-unreachable without the explicit human path.
-
-## Phase 20 — Paper broker with real sandbox fills
-Goal: realistic fills and slippage with zero real-money risk — the paper mock upgraded to a
-real venue's sandbox.
-
-- [ ] **P20.1** Wire the paper broker to a venue's paper endpoint (Tradier / Alpaca sandbox)
-      for realistic fills/slippage; contract-tested over recorded fixtures.
-
-**Exit gate:** all P20 boxes checked · `cargo xtask ci` green offline · a sandbox order
-round-trips place → fill → position with real venue semantics.
-
-## Phase 21 — Risk engine (in-code)
-Goal: the risk mandate as enforced code — §0 keystone 2's "risk check in the loop" made
-mechanical, with veto power over every order path.
-
-- [ ] **P21.1** A risk engine sitting in front of every `place_order`: sizing, max loss,
-      portfolio Greeks limits, earnings/liquidity landmines (fed by the Phase-9 events
-      capability). **Hard veto** — an order the mandate rejects cannot be placed.
-
-**Exit gate:** all P21 boxes checked · `cargo xtask ci` green · tests prove a
-mandate-violating order is vetoed on every path, paper included.
-
-## Phase 22 — Live-trading gate
-Goal: the deliberate, human-only path to real orders — every layer required, none
-inferrable, with a dry-run that shows exactly what would happen.
-
-- [ ] **P22.1** The live gate: explicit env flag + config + interactive confirmation + risk
-      sign-off, **all** required; absence of any one keeps execution in paper.
-- [ ] **P22.2** A dry-run mode printing exactly what *would* be sent, without sending.
-- [ ] **P22.3** Extensive tests that live mode is unreachable by inference — no combination
-      of config/flags short of the full human path reaches a real order.
-
-**Exit gate:** all P22 boxes checked · `cargo xtask ci` green · the unreachability tests
-stand in CI; a dry-run renders the exact order without side effects.
+**Exit gate:** none — nothing to verify. Proceed to Phase 23.
 
 ## Phase 23 — Journal crate
 Goal: close the loop from finding to outcome — so a strategy's *real* hit rate becomes
@@ -463,8 +458,8 @@ measurable instead of remembered.
 
 - [ ] **P23.1** Watchlist, trade log, and thesis tracking, persisted via the Phase-8
       `Store`.
-- [ ] **P23.2** Link the chain: scan hit → research → thesis → (paper) trade → outcome; the
-      strategy's realized hit rate is queryable.
+- [ ] **P23.2** Link the chain: scan hit → research → thesis → trade (logged manually —
+      the engine places nothing) → outcome; the strategy's realized hit rate is queryable.
 
 **Exit gate:** all P23 boxes checked · `cargo xtask ci` green · a full chain from finding to
 recorded outcome round-trips through the store.
@@ -472,10 +467,11 @@ recorded outcome round-trips through the store.
 ## Phase 24 — Scheduled premarket scan & alerts
 Goal: the engine runs while you sleep — surface what's *new*, never whether to trade.
 
-- [ ] **P24.1** A scheduled premarket routine running the active strategies, diffing
-      against the watchlist/journal.
-- [ ] **P24.2** Alerts on new candidates via a notification/push seam (delivery is
-      pluggable like everything else); advisory only.
+- [ ] **P24.1** A scheduled premarket routine — deliberately thin: a cron entry driving
+      `exub scan --json` plus a journal-backed watchlist **diff** (`exub scan --diff`);
+      near-zero new engine code by design.
+- [ ] **P24.2** Alert on new candidates (the diff's output) via a simple notification hook
+      (webhook / ntfy / email — pluggable, minimal); advisory only.
 
 **Exit gate:** all P24 boxes checked · `cargo xtask ci` green · a scheduled run diffs, fires
 on a new candidate, and stays silent on a repeat.
@@ -496,19 +492,20 @@ rigor sized to the actual audience.
 **Exit gate:** all P25 boxes checked · `cargo xtask ci` green · a tagged release builds
 reproducibly from the lockfile; `ARCHITECTURE.md` exists and covers every `(decision)` item.
 
-## Phase 26 — CLI/TUI cockpit + optional API surface
-Goal: the daily-driver surface — and a deliberate decision, not a default, on any surface
-beyond the terminal.
+## Phase 26 — CLI cockpit polish
+Goal: the daily-driver surface, finished. The programmatic surfaces once planned here — a
+TUI, an HTTP/JSON API, and four SDKs (Python/TS/Rust/Go) — are **cut** (re-scoped 2026-07):
+`--json` covers scripts, MCP (Phase 17) covers agents, and a Rust consumer embeds the
+crates directly. The wire-stable `Finding` (P11.2) keeps a future API cheap *if demand ever
+appears*; building one now would be maintenance for users who don't exist.
 
-- [ ] **P26.1** Grow `exub` into a cockpit: `scan`, `providers`, `research`, `thesis`,
-      `journal`, `positions`, `doctor`; an optional TUI dashboard.
-- [ ] **P26.2** (decision) The optional HTTP/JSON API (and/or a thin SDK) as another pure
-      view over the same `Engine` — only if a non-terminal consumer needs it. The MCP server
-      (Phase 17) already covers agentic callers, so for a solo cockpit CLI + MCP may be
-      enough. Decide before building.
+- [ ] **P26.1** Finish the cockpit: `scan` (with `--diff`), `providers`, `backtest`,
+      `structure` (the Phase-18 resolver), `journal`, `serve` (the MCP server), `doctor`
+      (env/keys/store health). Consistent `--json` on every read command.
 
-**Exit gate:** all P26 boxes checked · `cargo xtask ci` green · the cockpit covers the full
-find → research → thesis → journal loop from one binary.
+**Exit gate:** all P26 boxes checked · `cargo xtask ci` green · the full loop — find →
+inspect → structure → journal → diff tomorrow — works from one binary, offline on mock and
+live on a real feed.
 
 ---
 
@@ -519,8 +516,8 @@ find → research → thesis → journal loop from one binary.
 - **Finds, never recommends:** no phase adds a "buy/sell" verdict or an autonomous action.
   The engine surfaces cited evidence; the human decides and trades.
 - **The engine authors the number, not the LLM:** every figure is computed by the engine and
-  cited to its inputs, so a number can't drift into a hallucination. The model chooses what
-  to look at; it never eyeballs a metric.
+  cited to its inputs, so a number can't drift into a hallucination. The agent (over MCP)
+  chooses what to look at; it never eyeballs a metric.
 - **Canonical schema is the anti-corruption layer:** adapters map raw APIs → canonical types
   (`Bar`, `IvSnapshot`, `Finding`); the engine never sees raw. Provider API drift is
   contained to one adapter and **caught in CI** by contract tests over recorded fixtures.
@@ -533,12 +530,14 @@ find → research → thesis → journal loop from one binary.
 - **Structured errors, no panics:** one `ProviderError` vocabulary; `unwrap` / `expect` /
   `panic!` denied outside tests. A failed feed/model/broker call is a value that degrades to
   a clear message.
-- **Guardrails are code:** paper by default; a mechanical risk veto in front of anything
-  resembling a trade; going live is a deliberate, multi-step, human-only act that types +
-  tests make impossible to infer.
+- **No execution, no LLM — by construction:** the engine contains no order-placement path
+  to any real venue and no code that calls a model. It cannot act, and it cannot fabricate
+  a number, because the code isn't there. `BrokerProvider` / `AiProvider` stay dormant
+  contracts; reviving either is an explicit re-scope, never drift.
 - **Decimals internally, percent at the edge:** money/vol are decimals; format only at
   display.
-- **Discovery, not everything:** exuberance does *not* do HFT / sub-second execution,
-  automatic order placement, portfolio optimization or allocation, tax-lot accounting, or
-  act as a data vendor (it reads sources you're licensed for and never redistributes their
-  data). It finds and cites; the human decides and trades.
+- **Discovery, not everything:** exuberance does *not* do real-time or streaming data (EOD
+  is the product), HFT / sub-second anything, order placement of any kind, portfolio
+  optimization or allocation, tax-lot accounting, or act as a data vendor (it reads sources
+  you're licensed for and never redistributes their data). It finds and cites; the human
+  decides and trades.

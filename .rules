@@ -1,9 +1,13 @@
 # exuberance
 
-A trading + AI cockpit for discretionary traders — **any market, any strategy.**
-A Rust engine whose **data feeds, strategies, AI models, and brokers all plug in
-behind traits**, with an MCP surface — not tied to one asset class, one strategy,
-or one AI harness. This file is the operating manual — read it every session.
+A grounded trade-*discovery* engine + AI cockpit for discretionary traders —
+**any market, any strategy. It finds and cites; it never recommends and never
+acts.** A Rust engine whose **data feeds and strategies plug in behind traits**,
+surfaced through a CLI and (on the roadmap) an MCP server — not tied to one asset
+class, one strategy, one data vendor, or one AI harness. The engine contains **no
+LLM code and no execution path** — intelligence connects from outside over MCP,
+and you trade in your own brokerage. This file is the operating manual — read it
+every session.
 
 **Scope: all traders, not just options/vol.** The engine is strategy- and
 asset-class-agnostic (equities, options, futures, crypto, FX). The cheap-vol /
@@ -95,36 +99,42 @@ xtask/        Dev orchestration — `cargo xtask ci` runs the full local gate. N
   distinct from the engine's own future MCP *surface*, which exposes grounded,
   cited signals rather than raw data — see the AI layer below.)
 
-## The AI layer (in the engine, not a harness)
+## The AI layer (MCP — agents bring their own model)
 
-The AI layer lives **inside the engine**, not as tool-specific personas:
+The engine contains **no LLM code**: intelligence connects from the *outside*.
 
-- **Model + agent adapters behind one seam.** Any LLM (Claude, Gemini, OpenAI) and
-  any coding agent (Claude Code, Gemini CLI, Codex) plug in behind `AiProvider`,
-  selected by config (ROADMAP Phase 16). The model *plans* a query; the **engine**
-  fetches + computes + cites the number, so a figure can't be hallucinated.
-- **Exposed via MCP.** The engine publishes its grounded discovery capabilities
-  (scan, evaluate, backtest) as an MCP tool-server (Phase 17), so any agentic
-  assistant calls *our* cited signals instead of crunching raw data itself.
-- **The desk process as a cited pipeline.** scan → research a name → write a thesis
-  → risk-check → adversarial review becomes a reproducible, logged, *cited* engine
-  pipeline (Phase 18) — harness-agnostic, part of the engine, not `.claude/` config.
+- **Agents drive the engine over MCP** (ROADMAP Phase 17). Claude Code, Gemini
+  CLI, or Codex connect as MCP clients with their own model + key; the engine
+  never reads a model API key. The agent *plans* what to look at; the **engine**
+  fetches + computes + cites the number, so a figure can't be hallucinated — the
+  division of labor is enforced by *absence*, not discipline.
+- **The MCP surface is the AI layer.** `exub serve` publishes scan, evaluate,
+  backtest, structure, and stored IV history (with provenance) as tools, so any
+  agentic assistant calls *our* cited signals instead of crunching raw data.
+- **The desk process is agent-side.** scan → research → thesis → adversarial
+  review is a documented reference workflow orchestrated by the agent over those
+  tools (P17.3); every number in it comes from an engine tool call. The
+  deterministic Finding→structure step is engine code (Phase 18).
 
-There are no bespoke subagents or slash-command skills: that Claude-Code-specific
-layer was dropped in favor of the in-engine AI layer above.
+There are no bespoke subagents, slash-command skills, or in-engine model
+adapters: the `.claude/` layer was dropped, and the in-engine tool-use
+loop/adapters were cut in favor of MCP (see the Phases 15–16 tombstone). The
+`AiProvider` trait + `EchoAi` mock remain in `exub-core` as a dormant seam only.
 
 ## Guardrails (non-negotiable)
 
-This repo will eventually reach broker execution. Until then and after:
-
-1. **No live orders without an explicit human go.** Execution defaults to paper
-   (`EXUB_TRADING_MODE=paper`). Flipping to real money is a deliberate, manual
-   act — never inferred, never done by an agent on its own.
+1. **No execution path, by construction.** The engine places no orders — there
+   is no order code to any real venue, and there never will be by drift
+   (ROADMAP Phases 19–22 tombstone). The `BrokerProvider`/`PaperBroker` skeleton
+   in `exub-core` is an inert reference contract; `EXUB_TRADING_MODE` stays
+   `paper` and is vestigial. Reviving execution is an explicit re-scope with its
+   own guardrail design — never a feature to slip in.
 2. **Never commit secrets.** Keys live in `.env` (gitignored). `.env.example`
-   documents the shape.
-3. **A risk check is in the loop for anything resembling a trade.** Position
-   sizing and mandate checks are mechanical and not optional — the in-code risk
-   engine (ROADMAP Phase 21) has veto.
+   documents the shape. The only keys the engine ever reads are *data-feed*
+   keys — never a model key, never broker credentials.
+3. **No LLM calls from the engine.** The engine computes; agents reason —
+   over MCP, with their own model. If engine code wants to call a model,
+   that's a design smell (see the Phases 15–16 tombstone).
 4. **Finds, never recommends — decision *support*, not advice.** This is the
    load-bearing principle, not a footnote. The engine *finds* trades:
    it surfaces candidates and the evidence that justifies them (whatever metrics
