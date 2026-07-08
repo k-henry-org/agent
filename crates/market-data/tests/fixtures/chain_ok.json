@@ -1,0 +1,21 @@
+{
+  "status": "OK",
+  "request_id": "synthetic-fixture-not-fetched",
+  "results": [
+    {
+      "implied_volatility": 0.30,
+      "details": { "contract_type": "call", "strike_price": 100.0, "expiration_date": "2030-01-18", "shares_per_contract": 100 },
+      "underlying_asset": { "ticker": "AAPL", "price": 101.0 }
+    },
+    {
+      "implied_volatility": 0.40,
+      "details": { "contract_type": "put", "strike_price": 100.0, "expiration_date": "2030-01-18", "shares_per_contract": 100 },
+      "underlying_asset": { "ticker": "AAPL", "price": 101.0 }
+    },
+    {
+      "implied_volatility": 0.80,
+      "details": { "contract_type": "call", "strike_price": 120.0, "expiration_date": "2030-01-18", "shares_per_contract": 100 },
+      "underlying_asset": { "ticker": "AAPL", "price": 101.0 }
+    }
+  ]
+}

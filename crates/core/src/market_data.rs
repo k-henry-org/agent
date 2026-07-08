@@ -29,6 +29,7 @@ pub struct Bar {
 
 impl Bar {
     /// Build a bar (needed because `#[non_exhaustive]` forbids struct-literal construction downstream).
+    #[must_use]
     pub fn new(t: i64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Self {
         Self {
             t,
@@ -57,6 +58,7 @@ pub struct IvSnapshot {
 
 impl IvSnapshot {
     /// Build an IV snapshot (needed because `#[non_exhaustive]` forbids downstream struct literals).
+    #[must_use]
     pub fn new(symbol: impl Into<String>, iv: f64, iv_history: Vec<f64>) -> Self {
         Self {
             symbol: symbol.into(),
@@ -156,23 +158,12 @@ mod tests {
 
     #[test]
     fn closes_extracts_close_series() {
+        // Via the constructor even in-crate (where `#[non_exhaustive]` wouldn't force it):
+        // the P6.1 exit-gate proof showed struct literals here are the only call sites a
+        // new field would break — route them through `::new` so additive evolution is free.
         let bars = vec![
-            Bar {
-                t: 0,
-                open: 1.0,
-                high: 1.0,
-                low: 1.0,
-                close: 10.0,
-                volume: 0.0,
-            },
-            Bar {
-                t: 1,
-                open: 1.0,
-                high: 1.0,
-                low: 1.0,
-                close: 11.0,
-                volume: 0.0,
-            },
+            Bar::new(0, 1.0, 1.0, 1.0, 10.0, 0.0),
+            Bar::new(1, 1.0, 1.0, 1.0, 11.0, 0.0),
         ];
         assert_eq!(closes(&bars), vec![10.0, 11.0]);
     }

@@ -15,11 +15,11 @@ license = "Apache-2.0"
 authors = ["k-henry <khe4r6@gmail.com>"]
 repository = "exuberance"
 
-# Keep the *core* crates (vol/market-data/signals/core) dependency-free so
-# `cargo test` on them runs offline and fast. Heavier deps live at the edges: the
-# CLI (config/logging/arg-parsing) and `xtask` (dev orchestration) below. HTTP
-# stacks (reqwest/tokio) get added per-adapter behind features when live feeds and
-# broker execution land — see ROADMAP.md.
+# Keep the *core* crates (vol/signals/core) dependency-free so `cargo test` on them runs
+# offline and fast. Heavier deps live at the edges: the CLI (config/logging/arg-parsing) and
+# `xtask` (dev orchestration). The HTTP stack (reqwest/secrecy/serde_json) has now landed —
+# but only behind `market-data/massive-live`, so a default build still compiles it in while
+# `--no-default-features` keeps the lean, offline path (ROADMAP keystone 1 / Phase 7).
 [workspace.dependencies]
 anyhow = "1"
 # Async seams: the provider traits are `async` so real HTTP feeds/models don't block. `async-trait` keeps
@@ -32,6 +32,13 @@ serde = { version = "1", features = ["derive"] }
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Live-feed HTTP stack — only pulled in behind `market-data/massive-live` (Phase 7).
+# reqwest with rustls (no system OpenSSL); secrecy holds the API key so it can't leak to a log.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = "1"
+secrecy = "0.10"
+# Dev-only: a local mock HTTP server for the offline contract tests (drift fails CI, not a live scan).
+wiremock = "0.6"
 
 # No-panic discipline (Phase 6): a failed feed/model/broker call is a value (`Err`), never a crash.
 # `unwrap`/`expect` are denied outside tests; `clippy.toml` re-allows them in tests. These are clippy

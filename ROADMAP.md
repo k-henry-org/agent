@@ -210,16 +210,16 @@ from config.
 Goal: the canonical types hardened for additive evolution, and the numeric/time/error story
 decided once — before real adapters multiply the cost of changing them.
 
-- [ ] **P6.1** Canonical types (`Bar`, `IvSnapshot`, `CheapVolResult`, `ProviderError`) are
+- [x] **P6.1** Canonical types (`Bar`, `IvSnapshot`, `CheapVolResult`, `ProviderError`) are
       `#[non_exhaustive]` with constructors, so the schema evolves additively without
       breaking downstream matches or struct literals.
-- [ ] **P6.2** (decision) **f64 for stats, decimal at the money edge:** prices/vols stay
+- [x] **P6.2** (decision) **f64 for stats, decimal at the money edge:** prices/vols stay
       `f64` — the correct representation for statistical vol math (log returns, stddev,
       ranks); exact decimal money would belong at an order/broker edge, which is **cut by
       design** (if execution is ever re-scoped, decimal money comes with it). Timestamps
       stay epoch-seconds **UTC** (market close); a typed time crate isn't worth the
       dependency yet.
-- [ ] **P6.3** `ProviderError` grown to the structured set incl.
+- [x] **P6.3** `ProviderError` grown to the structured set incl.
       `RateLimited { retry_after }`; the **no-panic lint** (`unwrap_used` / `expect_used`
       denied outside tests via workspace lints + `clippy.toml`) — production code is
       panic-free by construction.
@@ -235,21 +235,31 @@ websockets, or intraday data (real-time is an *execution* concern, and execution
 **Plumbing, per §0 keystone 3** — on its own this is raw access (what a vendor's MCP already
 offers); its payoff is Phases 8 + 17 built on top. Do not treat wiring it as the product.
 
-- [ ] **P7.1** `MassiveSource` behind a `massive-live` feature: **EOD** REST aggregates →
-      `daily_bars`; end-of-day options snapshot → `iv_snapshot` (ATM / 30-day IV). Key from
-      `MASSIVE_API_KEY` (env only, held in `secrecy::SecretString` at the adapter edge).
-- [ ] **P7.2** **Data correctness (the #1 bug class):** explicit adjusted-vs-unadjusted
-      handling for splits/dividends (realized vol on unadjusted prices is *wrong*),
-      trading-calendar / session / timezone handling, and bad-tick + missing-bar
-      validation — before any screen trusts the data.
-- [ ] **P7.3** A shared HTTP module: client construction, timeouts, retries with backoff,
-      `Retry-After` honored and surfaced as `ProviderError::RateLimited { retry_after }`.
-- [ ] **P7.4** **Contract tests over recorded fixtures** — deterministic and offline, so
-      provider API drift fails CI, not a premarket scan. The live path is opt-in and never
-      runs in CI.
+- [x] **P7.1** `MassiveSource` behind a `massive-live` feature (default on; a lean
+      `--no-default-features` build keeps a `NotImplemented` stub): **EOD** REST aggregates →
+      `daily_bars`; end-of-day options snapshot → `iv_snapshot` (ATM / 30-day IV, history
+      empty until Phase 8). Key from `MASSIVE_API_KEY` (env only, held in
+      `secrecy::SecretString` at the adapter edge). `exub scan --symbols AAPL,…` is the
+      minimal real-universe input; index/watchlist universes are Phase 10.
+- [x] **P7.2** **Data correctness (the #1 bug class):** `adjusted=true` always requested
+      (realized vol on unadjusted prices is *wrong*); bad-tick validation (non-positive/
+      non-finite prices, high<low, negative volume dropped), ascending sort + duplicate-
+      timestamp dedupe, `NotFound` when nothing valid survives. Calendar math (30-DTE
+      selection, expiration-band query) via a pure civil-date routine — no time crate
+      (decision 001); trading-calendar/session refinements land as real usage demands.
+- [x] **P7.3** A shared HTTP module (`http.rs`): client with connect/total timeouts, bounded
+      retry+backoff on 5xx/transport, and `Retry-After` parsed and surfaced as
+      `ProviderError::RateLimited { retry_after }` (surfaced for the caller to honor, not
+      blocked on mid-call). Key on the `Authorization` header, never the URL.
+- [x] **P7.4** **Contract tests over synthetic fixtures** — a local `wiremock` server replays
+      recorded shapes, so provider API drift fails CI, not a premarket scan: adjusted-query
+      + header assertion, millis→secs mapping, 429→`RateLimited{retry_after}`, 401→`Auth`,
+      ATM-IV selection. All offline; the real-network path only runs when a human sets a key.
 
 **Exit gate:** all P7 boxes checked · `cargo xtask ci` green offline · with a real key set
-locally, `exub scan --data-provider massive` returns real, cited candidates.
+locally, `exub scan --data-provider massive --symbols AAPL,TSLA,NVDA` fetches real EOD bars +
+ATM IV and renders **cited evidence** (candidates need Phase 8's IV *history* to rank — until
+then every name honestly fails "no IV history to rank").
 
 ## Phase 8 — IV history pipeline + storage seam
 Goal: **the reason to exist** (§0 keystone 3b). IV rank needs 1–3 years of trailing IV that

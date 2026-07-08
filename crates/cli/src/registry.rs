@@ -8,6 +8,8 @@
 
 use anyhow::{bail, Result};
 use exub_core::{AiProvider, EchoAi, MarketDataProvider, ProviderKind};
+#[cfg(feature = "massive-live")]
+use market_data::MassiveSource;
 use market_data::MockSource;
 
 /// Whether a catalog entry is implemented, on the roadmap, or a dormant seam.
@@ -63,8 +65,14 @@ pub fn catalog() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "massive",
             kind: MarketData,
-            status: Planned,
-            note: "Massive (formerly Polygon.io) — licensed feed; IV snapshot → accumulate history",
+            // Wired once the `massive-live` feature is on (the default build); `Planned` in a
+            // lean `--no-default-features` build where the HTTP adapter isn't compiled.
+            status: if cfg!(feature = "massive-live") {
+                Wired
+            } else {
+                Planned
+            },
+            note: "Massive (formerly Polygon.io) — licensed EOD feed; IV snapshot → accumulate history",
         },
         CatalogEntry {
             name: "alpha-vantage",
@@ -158,6 +166,10 @@ fn wired_names(kind: ProviderKind) -> Vec<&'static str> {
 pub fn build_data_provider(name: &str) -> Result<Box<dyn MarketDataProvider>> {
     match name {
         "mock" => Ok(Box::new(MockSource::demo())),
+        // `?` turns a `ProviderError` (e.g. a missing `MASSIVE_API_KEY` → `Auth`) into the
+        // CLI's `anyhow::Error` via the std::error::Error impl (pinned in P3.2).
+        #[cfg(feature = "massive-live")]
+        "massive" => Ok(Box::new(MassiveSource::from_env()?)),
         other => bail!(
             "data provider '{other}' is not wired yet (available: {}). \
              Run `exub providers` to see the catalog; the wiring plan is in ROADMAP.md.",
@@ -240,8 +252,10 @@ mod tests {
 
         // A catalogued-but-planned vendor is a clear, actionable error, not a silent
         // fallback: it names the alternatives AND the command that shows the catalog.
-        // `.err()` (not `unwrap_err`) because the Ok type `Box<dyn MarketDataProvider>` isn't `Debug`.
-        let err = build_data_provider("massive")
+        // `alpha-vantage` is always planned (never wired), unlike `massive` which flips with
+        // the feature — asserted separately below. `.err()` (not `unwrap_err`) because the
+        // Ok type `Box<dyn MarketDataProvider>` isn't `Debug`.
+        let err = build_data_provider("alpha-vantage")
             .err()
             .expect("a planned provider must error")
             .to_string();
@@ -249,6 +263,21 @@ mod tests {
             err.contains("not wired yet") && err.contains("mock") && err.contains("exub providers"),
             "{err}"
         );
+
+        // `massive` flips with the feature: under `massive-live` it's wired and selecting it
+        // fails only on the missing key (Auth), not "not wired"; without the feature it's a
+        // planned plug-in point like any other.
+        #[cfg(feature = "massive-live")]
+        {
+            std::env::remove_var("MASSIVE_API_KEY");
+            let err = build_data_provider("massive")
+                .err()
+                .expect("no key → error")
+                .to_string();
+            assert!(err.contains("MASSIVE_API_KEY"), "{err}");
+        }
+        #[cfg(not(feature = "massive-live"))]
+        assert!(build_data_provider("massive").is_err());
 
         // A dormant AI vendor errors with the truth: by design, MCP is the path.
         let err = build_ai_provider("claude")

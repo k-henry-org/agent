@@ -52,7 +52,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Run the cheap-vol / proven-mover screen over the configured data provider.
-    Scan,
+    Scan {
+        /// Comma-separated symbols to scan (e.g. `AAPL,TSLA,NVDA`). Defaults to the built-in
+        /// demo universe. Real universe input — index constituents, watchlists — is Phase 10.
+        #[arg(long, value_delimiter = ',', value_name = "SYM,…")]
+        symbols: Option<Vec<String>>,
+    },
     /// List the plug-in catalog (data feeds, AI models, coding agents, brokers) + the configured selection.
     Providers,
 }
@@ -79,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     match cli.cmd {
-        Cmd::Scan => run_scan(&cfg).await,
+        Cmd::Scan { symbols } => run_scan(&cfg, symbols).await,
         Cmd::Providers => {
             list_providers(&cfg);
             Ok(())
@@ -134,13 +139,20 @@ fn print_group(title: &str, kind: ProviderKind) {
 /// feed is scanning a big universe); the footer then names the most-underpriced hit from
 /// the sorted result, so the ranked answer survives streaming. A fully sortable/filterable
 /// view is `--json`'s job (ROADMAP P11.3), which stays atomic.
-async fn run_scan(cfg: &config::Config) -> anyhow::Result<()> {
+async fn run_scan(cfg: &config::Config, symbols: Option<Vec<String>>) -> anyhow::Result<()> {
     let source = registry::build_data_provider(&cfg.data_provider)?;
     let criteria = CheapVolCriteria {
         lookback_days: 100,
         ..Default::default()
     };
-    let universe = MockSource::DEMO_UNIVERSE;
+    // Explicit `--symbols`, else the built-in demo universe (real universe input is Phase 10).
+    let owned: Vec<String> = symbols.unwrap_or_else(|| {
+        MockSource::DEMO_UNIVERSE
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    });
+    let universe: Vec<&str> = owned.iter().map(String::as_str).collect();
 
     println!(
         "cheap-vol screen ({}) — scanning {} symbols, rows stream as found\n",

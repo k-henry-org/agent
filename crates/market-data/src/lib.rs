@@ -15,6 +15,15 @@ pub use exub_core::{
     ProviderKind, ProviderResult,
 };
 
+// The live Massive adapter + its shared HTTP module live behind the `massive-live` feature,
+// so the mock path (and a `--no-default-features` build) compiles with no HTTP deps at all.
+#[cfg(feature = "massive-live")]
+mod http;
+#[cfg(feature = "massive-live")]
+mod massive;
+#[cfg(feature = "massive-live")]
+pub use massive::MassiveSource;
+
 /// In-memory data source for tests, demos, and backtest fixtures.
 #[derive(Debug, Default, Clone)]
 pub struct MockSource {
@@ -103,16 +112,22 @@ impl MarketDataProvider for MockSource {
     }
 }
 
-/// Live Massive data source. Skeleton only — HTTP wiring is the next
-/// milestone (see CLAUDE.md "Build order"). Reads `MASSIVE_API_KEY` from env.
+/// Stub `MassiveSource` for the lean, no-`massive-live` build: it keeps the type present (so
+/// the registry and tests still name it) but every fetch is an honest `NotImplemented`. The
+/// real HTTP adapter lives in [`massive`] behind the feature.
+#[cfg(not(feature = "massive-live"))]
 #[derive(Debug, Clone)]
 pub struct MassiveSource {
     #[allow(dead_code)]
     api_key: String,
 }
 
+#[cfg(not(feature = "massive-live"))]
 impl MassiveSource {
     /// Construct from the `MASSIVE_API_KEY` environment variable.
+    ///
+    /// # Errors
+    /// [`ProviderError::Auth`] if the key is unset.
     pub fn from_env() -> ProviderResult<Self> {
         let api_key = std::env::var("MASSIVE_API_KEY")
             .map_err(|_| ProviderError::Auth("MASSIVE_API_KEY not set".into()))?;
@@ -120,6 +135,7 @@ impl MassiveSource {
     }
 }
 
+#[cfg(not(feature = "massive-live"))]
 impl Provider for MassiveSource {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
@@ -127,24 +143,21 @@ impl Provider for MassiveSource {
             kind: ProviderKind::MarketData,
             capabilities: vec![
                 Capability::DailyBars,
-                Capability::IntradayBars,
-                Capability::Quotes,
-                Capability::OptionsChain,
                 Capability::ImpliedVol,
+                Capability::OptionsChain,
             ],
         }
     }
 }
 
+#[cfg(not(feature = "massive-live"))]
 #[async_trait]
 impl MarketDataProvider for MassiveSource {
     async fn daily_bars(&self, _symbol: &str, _lookback_days: usize) -> ProviderResult<Vec<Bar>> {
-        // TODO: GET /v2/aggs/ticker/{symbol}/range/1/day/{from}/{to}
         Err(ProviderError::NotImplemented("MassiveSource::daily_bars"))
     }
 
     async fn iv_snapshot(&self, _symbol: &str) -> ProviderResult<IvSnapshot> {
-        // TODO: pull ATM IV from the options snapshot endpoint + build history.
         Err(ProviderError::NotImplemented("MassiveSource::iv_snapshot"))
     }
 }
@@ -199,20 +212,17 @@ mod tests {
         assert_eq!(src.info().kind, ProviderKind::MarketData);
     }
 
-    /// One test fn for every `MassiveSource` path that exists today, because they all
-    /// touch the process-global `MASSIVE_API_KEY` env var — a single sequential fn
-    /// avoids races with cargo's parallel test threads (no other test reads it).
+    /// The lean-build stub: no key → typed Auth; with a key → card + honest NotImplemented.
+    /// One sequential fn because it touches the process-global `MASSIVE_API_KEY`.
+    #[cfg(not(feature = "massive-live"))]
     #[tokio::test]
     async fn massive_stub_auth_and_not_implemented() {
-        // No key → a typed Auth error, not a panic or a silent default.
         std::env::remove_var("MASSIVE_API_KEY");
         assert_eq!(
             MassiveSource::from_env().err(),
             Some(ProviderError::Auth("MASSIVE_API_KEY not set".into()))
         );
 
-        // With a key the stub constructs, advertises its card, and returns honest
-        // NotImplemented from both trait methods (never fabricated data).
         std::env::set_var("MASSIVE_API_KEY", "test-key-not-real");
         let src = MassiveSource::from_env().expect("key is set");
         assert_eq!(src.info().id, "massive");
@@ -224,15 +234,38 @@ mod tests {
             src.iv_snapshot("SPY").await,
             Err(ProviderError::NotImplemented("MassiveSource::iv_snapshot"))
         );
-        // Snapshot-only card (no OptionsHistory) → the engine must ACCUMULATE its IV
-        // history forward (Phase 8) — the capability-driven strategy, pinned on a real
-        // vendor's card rather than a synthetic test double.
         assert!(!src.supports(Capability::OptionsHistory));
         assert_eq!(
             exub_core::iv_history_strategy(&src),
             exub_core::IvHistoryStrategy::Accumulate
         );
-
         std::env::remove_var("MASSIVE_API_KEY");
+    }
+
+    /// The live-build twin (no network): `from_env` Auth path, the EOD capability card, and
+    /// the capability-driven IV strategy on the real vendor's card. The fetch methods
+    /// themselves are exercised over a mock server in `tests/contract.rs`.
+    #[cfg(feature = "massive-live")]
+    #[test]
+    fn massive_live_from_env_card_and_strategy() {
+        std::env::remove_var("MASSIVE_API_KEY");
+        assert_eq!(
+            MassiveSource::from_env().err(),
+            Some(ProviderError::Auth("MASSIVE_API_KEY not set".into()))
+        );
+
+        let src = MassiveSource::with_key("test-key-not-real").expect("client builds");
+        assert_eq!(src.info().id, "massive");
+        assert!(src.supports(Capability::DailyBars));
+        assert!(src.supports(Capability::ImpliedVol));
+        // EOD-only: no intraday/quotes on the card.
+        assert!(!src.supports(Capability::IntradayBars));
+        assert!(!src.supports(Capability::Quotes));
+        // Snapshot-only feed (no OptionsHistory) → accumulate the IV series forward (Phase 8).
+        assert!(!src.supports(Capability::OptionsHistory));
+        assert_eq!(
+            exub_core::iv_history_strategy(&src),
+            exub_core::IvHistoryStrategy::Accumulate
+        );
     }
 }

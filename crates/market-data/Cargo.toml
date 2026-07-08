@@ -6,18 +6,32 @@ license.workspace = true
 publish = false
 description = "Market-data providers implementing exub-core's MarketDataProvider trait (mocks now; Massive, Alpha Vantage next)."
 
+[features]
+# The live Massive adapter (Phase 7). Off by default at the crate level; the CLI turns it on
+# via its own default feature, so `cargo build -p market-data` stays lean and offline while a
+# default `exub` build has real HTTP. `tokio/time` powers the retry backoff's `sleep`.
+massive-live = ["dep:reqwest", "dep:serde", "dep:serde_json", "dep:secrecy", "dep:tokio", "dep:tracing", "tokio/time"]
+
 [dependencies]
 exub-core = { path = "../core" }
-# Async provider impls (the seams are `async`); `reqwest` joins here behind a feature when live HTTP lands.
+# Async provider impls (the seams are `async`).
 async-trait.workspace = true
-# When we wire live Massive HTTP we'll add:
-#   reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-#   serde   = { version = "1", features = ["derive"] }
-# behind a `massive-live` feature so the pure types stay offline-testable.
+# Live-feed HTTP stack — all optional, pulled in only by `massive-live`, so the mock path
+# builds with no HTTP deps at all.
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+secrecy = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
-# A runtime to drive the async provider methods in `#[tokio::test]`.
-tokio = { workspace = true, features = ["rt", "macros"] }
+# A runtime to drive the async provider methods in `#[tokio::test]`. The wider feature set
+# (net/time/rt-multi-thread) is what wiremock's server + reqwest's client need — `#[tokio::test]`'s
+# `enable_all()` only wires up the IO/time drivers when those features are compiled in.
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "net", "time"] }
+# A local mock HTTP server: the contract tests replay recorded shapes so API drift fails CI.
+wiremock.workspace = true
 
 [lints]
 workspace = true

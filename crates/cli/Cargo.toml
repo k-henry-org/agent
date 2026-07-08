@@ -10,6 +10,12 @@ description = "exub — command-line entry point for the exuberance trading engi
 name = "exub"
 path = "src/main.rs"
 
+[features]
+# The live Massive feed is wired by default — a fresh `exub` can hit a real key out of the box.
+# `--no-default-features` gives the lean, HTTP-free build (mock only).
+default = ["massive-live"]
+massive-live = ["market-data/massive-live"]
+
 [dependencies]
 exub-core = { path = "../core" }
 market-data = { path = "../market-data" }
