@@ -50,10 +50,17 @@ pub mod mock {
             while let Some(rel) = input[from..].find(kw) {
                 let start = from + rel;
                 let end = start + kw.len();
+                // Spans are u32 (wire-stable across wasm32/host); convert without silent
+                // truncation. Offsets past u32::MAX can't be represented in a Span and never occur
+                // for real inputs (a scanned document fits in memory) — bail if they somehow did.
+                let (Ok(start_u32), Ok(end_u32)) = (u32::try_from(start), u32::try_from(end))
+                else {
+                    break;
+                };
                 findings.push(Finding::new(
                     format!("keyword.{kw}"),
                     1.0,
-                    Span::new(start as u32, end as u32),
+                    Span::new(start_u32, end_u32),
                 ));
                 from = end;
             }
@@ -74,7 +81,6 @@ pub mod mock {
     /// The native [`Detector`] wrapper over [`detect`] — used by the CLI (P1.5) and as the test
     /// double the wasm path is checked against (P3.4).
     #[derive(Debug, Default, Clone, Copy)]
-    #[non_exhaustive]
     pub struct MockDetector;
 
     impl MockDetector {

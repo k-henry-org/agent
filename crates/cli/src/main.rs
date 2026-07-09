@@ -55,10 +55,27 @@ struct CheckArgs {
     text: Option<String>,
 }
 
+/// The outcome of a check, mapped to the process exit code — avoids boolean blindness at the
+/// exit boundary. (Operational errors are the `Err` arm and map to exit 2.)
+enum Outcome {
+    /// No findings.
+    Clean,
+    /// The detector fired.
+    Detected,
+}
+
+impl Outcome {
+    fn exit_code(self) -> ExitCode {
+        match self {
+            Outcome::Clean => ExitCode::SUCCESS,    // 0
+            Outcome::Detected => ExitCode::from(1), // a detection fired
+        }
+    }
+}
+
 fn main() -> ExitCode {
     match run() {
-        Ok(true) => ExitCode::from(1),  // a detection fired
-        Ok(false) => ExitCode::SUCCESS, // clean
+        Ok(outcome) => outcome.exit_code(),
         Err(e) => {
             eprintln!("agent: {e:#}");
             ExitCode::from(2) // operational error
@@ -66,12 +83,18 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> anyhow::Result<bool> {
-    let cli = Cli::parse();
-    let cfg = load_config(&cli)?;
+fn run() -> anyhow::Result<Outcome> {
+    // Destructure so the flag values move straight into the config layer — nothing is cloned.
+    let Cli {
+        cmd,
+        config,
+        detector,
+        log,
+    } = Cli::parse();
+    let cfg = load_config(config, detector, log)?;
     init_tracing(&cfg.log);
     tracing::debug!(detector = %cfg.detector, log = %cfg.log, "resolved config");
-    match cli.cmd {
+    match cmd {
         Cmd::Check(args) => run_check(&cfg, args),
     }
 }
@@ -89,23 +112,28 @@ fn init_tracing(filter: &str) {
         .try_init();
 }
 
-/// Fold the config layers: flags > env (`AGENT_*`) > `--config` file > defaults.
-fn load_config(cli: &Cli) -> anyhow::Result<Config> {
-    let file = match &cli.config {
-        Some(path) => Partial::from_toml_file(path)?,
+/// Fold the config layers: flags > env (`AGENT_*`) > `--config` file > defaults. Takes the flag
+/// values by value so nothing is cloned.
+fn load_config(
+    config: Option<PathBuf>,
+    detector: Option<String>,
+    log: Option<String>,
+) -> anyhow::Result<Config> {
+    let file = match config {
+        Some(path) => Partial::from_toml_file(&path)?,
         None => Partial::default(),
     };
     let env = Partial::from_env();
     let flags = Partial {
-        detector: cli.detector.clone(),
-        log: cli.log.clone(),
+        detector,
+        log,
         artifact_dir: None,
     };
     Ok(resolve(file, env, flags))
 }
 
-/// Run `agent check`. Returns `Ok(true)` if the detector fired, `Ok(false)` if clean.
-fn run_check(cfg: &Config, args: CheckArgs) -> anyhow::Result<bool> {
+/// Run `agent check`, returning the [`Outcome`] that maps to the exit code.
+fn run_check(cfg: &Config, args: CheckArgs) -> anyhow::Result<Outcome> {
     let text = match args.text {
         Some(t) => t,
         None => {
@@ -128,7 +156,11 @@ fn run_check(cfg: &Config, args: CheckArgs) -> anyhow::Result<bool> {
     } else {
         render(&verdict, &text);
     }
-    Ok(verdict.fired())
+    Ok(if verdict.fired() {
+        Outcome::Detected
+    } else {
+        Outcome::Clean
+    })
 }
 
 /// Resolve a detector name to its `Detector` and run it. An unknown name is an operational

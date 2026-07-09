@@ -96,8 +96,13 @@ pub fn unframe(buf: &[u8]) -> Result<&[u8], AbiError> {
     let prefix = buf.get(..LEN_PREFIX_BYTES).ok_or(AbiError::Truncated)?;
     // `prefix` is exactly LEN_PREFIX_BYTES (4) long, so the array conversion cannot fail.
     let len = u32::from_le_bytes(prefix.try_into().map_err(|_| AbiError::Truncated)?) as usize;
-    buf.get(LEN_PREFIX_BYTES..LEN_PREFIX_BYTES + len)
-        .ok_or(AbiError::Truncated)
+    // `checked_add`: a large prefix must not overflow `usize` on a 32-bit target (this crate also
+    // compiles to wasm32, where `usize` is 32-bit) — an overflow would wrap into a valid range and
+    // mis-read the payload.
+    let end = LEN_PREFIX_BYTES
+        .checked_add(len)
+        .ok_or(AbiError::Truncated)?;
+    buf.get(LEN_PREFIX_BYTES..end).ok_or(AbiError::Truncated)
 }
 
 #[cfg(test)]
