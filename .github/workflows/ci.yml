@@ -1,5 +1,9 @@
-# CI — fmt, clippy, build, test, docs, wasm artifact build, and supply-chain. Needs no network or API keys:
-# the mock detector keeps the whole pipeline offline on a stock runner. Mirror it locally with `cargo xtask ci`.
+# CI — the host-safe gate: fmt, clippy, build, test, docs, and supply-chain. Needs no KVM, root,
+# or network, so it runs on a stock runner. Mirror it locally with `cargo xtask ci`.
+#
+# The privileged tests (booting a microVM, loading/attaching eBPF) need /dev/kvm + elevated caps
+# and cannot run on a stock GitHub runner — a standard cloud VM can't nest KVM. They run under
+# `cargo xtask ci-privileged` on a bare-metal / nested-virt (or self-hosted) runner, added later.
 name: CI
 
 on:
@@ -16,79 +20,39 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Faster, less disk on the runner (incremental caching buys nothing for a clean CI build).
   CARGO_INCREMENTAL: 0
-  # Deny compiler warnings on build/test too, not just clippy. Dependency warnings are `--cap-lints` capped
-  # by cargo, so only our own crates are held to this — keeping CI == the local `xtask ci` gate.
+  # Deny compiler warnings on build/test too, not just clippy. Dependency warnings are `--cap-lints`
+  # capped by cargo, so only our own crates are held to this — keeping CI == the local gate.
   RUSTFLAGS: -D warnings
 
 jobs:
   check:
-    # Matrixed across two OS/arch so the P3.2 determinism test (same input → byte-identical
-    # verdict) is proven on a second target: ubuntu-latest is x86_64, macos-latest is ARM64.
-    # The local `cargo xtask ci` gate is single-machine and cannot do this — CI is where the
-    # cross-target check lives.
-    name: build · lint · test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: build · lint · test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install the pinned toolchain + wasm target
-        run: |
-          rustup component add rustfmt clippy
-          rustup target add wasm32-unknown-unknown
+      - name: Install the toolchain
+        run: rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --all --check
 
-      # --locked everywhere: build from the committed Cargo.lock, so a stale lock fails CI instead of
-      # surfacing at release time.
+      # --locked everywhere: build from the committed Cargo.lock, so a stale lock fails CI here
+      # instead of surfacing at release time.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Build
-        run: cargo build --locked
+        run: cargo build --workspace --locked
 
-      - name: Test (offline — mock detector, no keys)
-        run: cargo test --all-features --locked
+      - name: Test
+        run: cargo test --workspace --locked
 
-      # Docs are a shipped surface: broken/redundant intra-doc links fail here, not silently on the
-      # published docs.
       - name: Docs
-        run: cargo doc --no-deps --workspace --all-features --locked
+        run: cargo doc --no-deps --workspace --locked
         env:
           RUSTDOCFLAGS: -D warnings
-
-      # Build every detector to wasm and run its `cases/` goldens through the host runtime — a
-      # detector change that shifts a verdict fails here unless its goldens are updated (P4.3).
-      # `goldens` builds the artifacts first, so this covers the P2.3 build step too. wasm target
-      # installed above.
-      - name: Detector artifacts + goldens
-        run: cargo xtask goldens
-
-      # Enforce each detector's agent.toml budgets (wasm size, p99 latency, declared labels)
-      # against the artifacts built by the goldens step above (P4.4).
-      - name: Detector budgets
-        run: cargo xtask budgets
-
-  features:
-    name: feature matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-hack
-      # Every feature combination (and --no-default-features) must compile — guards the future feature-gated
-      # adapters. No --locked here: --no-dev-deps rewrites the manifests, which would force a lock update
-      # that --locked forbids. Lock freshness is already gated by the check job.
-      - name: Check the feature powerset
-        run: cargo hack --feature-powerset --no-dev-deps check --workspace
 
   deny:
     name: supply chain (cargo-deny)
@@ -99,12 +63,12 @@ jobs:
         with:
           command: check
 
-  # The single check to require in branch protection. Green only if every job above succeeded or was
-  # skipped — add a job above and it's covered here automatically, no branch-rule edit needed.
+  # The single check to require in branch protection. Green only if every job above succeeded or
+  # was skipped — add a job above and it's covered here automatically, no branch-rule edit needed.
   ci-status:
     name: CI status
     if: always()
-    needs: [check, features, deny]
+    needs: [check, deny]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every job passed

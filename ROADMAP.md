@@ -54,22 +54,23 @@ binary + jailer, a guest kernel (`vmlinux`), a way to build a rootfs, and the ay
 
 Turn `agent` from the wasm scanner into the Firecracker + aya sandbox; keep the git history.
 
-- [ ] **P0.1** (human git step) Shelve the wasm/scanner work on a branch, then gut `main`: remove
-      `crates/{abi,host,detectors,sandbox}`, `detectors/`, the scanner `ROADMAP` history is in git.
-- [ ] **P0.2** New workspace layout: `crates/vmm` (Firecracker driver), `crates/probes` (aya
-      eBPF programs, `no_std`), `crates/probes-loader` (userspace loader), `crates/cli` (`agent`),
-      `xtask`.
-- [ ] **P0.3** Rewrite `.rules` / `README.md` / `ARCHITECTURE.md` to the sandbox-engine identity
-      and the four spine properties; drop the detector/`Verdict`/feed framing.
-- [ ] **P0.4** Pin prerequisites in `README`: `firecracker`+jailer version, guest `vmlinux`
-      source, rootfs recipe, aya toolchain (`bpf-linker`, target, caps). A `make setup` / `xtask
-      setup` that checks them.
-- [ ] **P0.5** `cargo xtask ci` skeleton: fmt · clippy `-D warnings` · build · test · docs (the
-      eBPF crate builds for its own target, gated separately — see P8).
-- [ ] **P0.6** Decide + record the naming (keep `agent` umbrella vs a codename) — cheap, do it once.
-- [ ] **P0.7** `CHANGELOG.md` reset; a short `docs/` for the blog-series drafts each phase feeds.
-- [ ] **P0.8** A `justfile`/`xtask` target to run the whole thing needing root/`CAP_*` cleanly
-      (so day-to-day dev isn't `sudo cargo` roulette).
+- [x] **P0.1** (human git step) Shelve the wasm/scanner work on a branch, then gut `main`: remove
+      `crates/{abi,host,detectors,sandbox}`, `detectors/`. *(Gut done; scanner preserved at
+      `f54d353` on `origin/main` — create `archive/wasm-scanner` to name the point.)*
+- [x] **P0.2** New workspace layout: `crates/vmm` (Firecracker driver), `crates/probes` (aya
+      eBPF programs, `no_std`, excluded), `crates/probes-loader` (userspace loader), `crates/cli`
+      (`agent`), `xtask`.
+- [x] **P0.3** Rewrite `.rules` / `README.md` / `CONTRIBUTING.md` / `ARCHITECTURE.md` to the
+      sandbox-engine identity and the four spine properties; drop the detector/`Verdict`/feed framing.
+- [x] **P0.4** Prerequisites pinned in `CONTRIBUTING.md` (KVM, BTF, `firecracker`+jailer, aya
+      toolchain, caps); `cargo xtask setup` checks the host and reports what's missing.
+- [x] **P0.5** `cargo xtask ci` skeleton: fmt · clippy `-D warnings` · build · test · docs · deny
+      (the eBPF crate builds for its own target, gated separately — see P8).
+- [x] **P0.6** Naming: keep the `agent` umbrella (binary + repo); crates are
+      `vmm`/`probes`/`probes-loader`/`cli`.
+- [x] **P0.7** `CHANGELOG.md` reset; a short `docs/` for the per-phase writeups each phase feeds.
+- [x] **P0.8** `cargo xtask ci-privileged` runs the KVM/eBPF (`#[ignore]`d) tests behind a
+      `/dev/kvm` guard, so day-to-day dev isn't `sudo cargo` roulette.
 - **Exit gate:** `cargo xtask ci` green on an empty-but-scaffolded tree; `xtask setup` verifies the
   host can do KVM + eBPF; docs describe the engine, not the scanner.
 

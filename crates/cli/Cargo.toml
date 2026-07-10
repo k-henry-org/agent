@@ -5,24 +5,15 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 publish = false
-description = "The `agent` CLI — detect on text and render cited Verdicts."
+description = "The `agent` CLI — drive the Firecracker + aya code-execution sandbox."
 
 [[bin]]
 name = "agent"
 path = "src/main.rs"
 
 [dependencies]
-# The CLI now runs detectors as wasm artifacts through the host runtime (P3.4); it needs the
-# `Verdict` type to render, but no longer the native `mock` rule — that stays a test double.
-agent-abi = { path = "../abi" }
-agent-host = { path = "../host" }
-# The code sandbox: `agent run` / `run-python` execute untrusted wasm in the WASI runner.
-agent-sandbox = { path = "../sandbox" }
+agent-vmm = { path = "../vmm" }
 clap = { workspace = true }
-anyhow.workspace = true
-serde_json.workspace = true
-serde = { workspace = true }
-toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

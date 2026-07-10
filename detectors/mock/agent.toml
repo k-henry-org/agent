@@ -1,9 +1,0 @@
-# Detector manifest — labels this artifact may emit, and the size/latency budgets the gate
-# enforces against the built wasm (P4.4). Generous absolute ceilings, not tuning targets.
-id = "mock"
-version = "0.1.0"
-labels = ["keyword.badword", "keyword.injection", "keyword.secret"]
-
-[budgets]
-max_wasm_bytes = 131072 # 128 KiB
-max_p99_micros = 4000   # 4 ms per call

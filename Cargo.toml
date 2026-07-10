@@ -1,51 +1,37 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/abi",
-    "crates/host",
+    "crates/vmm",
+    "crates/probes-loader",
     "crates/cli",
-    "crates/detectors",
-    "crates/sandbox",
     "xtask",
 ]
-# Detector artifacts build for `wasm32-unknown-unknown`, not the host triple, and carry the
-# project's only `unsafe` (the FFI shim). Excluding them keeps the host gate (clippy
-# --all-targets, test, hack) host-only and green; `cargo xtask build-detectors` builds them
-# with an explicit --target. See ARCHITECTURE.md (P1.2) and ROADMAP §0.
-exclude = ["detectors"]
+# `crates/probes` holds the eBPF programs. They build for `bpfel-unknown-none` (not the host
+# triple) via `bpf-linker`, so excluding them keeps the everyday host gate (clippy --all-targets,
+# test) host-only and green; the eBPF object is built separately for its own target. See
+# `.rules`, `ROADMAP.md` (Phase 8), and `CONTRIBUTING.md`.
+exclude = ["crates/probes"]
 
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
 authors = ["k-henry <khe4r6@gmail.com>"]
 
-# The kernel is small and dependency-light by design: no HTTP, no async runtime, no secrets on
-# the detection path (see .rules). `agent-abi` — the contract every host and artifact links —
-# depends only on serde + serde_json so it stays cheap to embed and compiles to wasm.
+# Dependency-light by design. The host/driver path is `unsafe`-free; the Firecracker API is JSON
+# over a unix socket (serde), the CLI parses with clap, logs with tracing.
 [workspace.dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The TOML config-file layer (flags > env > file > defaults). No secrets ever live here.
-toml = "0.8"
-# Structured logging to stderr, filtered by config; stdout stays reserved for verdicts.
+# Structured logging to stderr; stdout stays reserved for a run's result / flight recorder.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# No-panic discipline: a hostile artifact, a malformed buffer, or a bad input is a value
-# (`Err`), never a crash. `unwrap`/`expect` are denied outside tests; `clippy.toml` re-allows
-# them in tests. Enforced by the `clippy … -D warnings` step in CI and `cargo xtask ci`. Each
-# crate opts in with `[lints] workspace = true`.
+# No-panic discipline on the host path: a hostile or crashing guest, a failed probe, or a broken
+# channel is a typed `Err`, never a crash. `unwrap`/`expect` are denied outside tests; `clippy.toml`
+# re-allows them in tests. Enforced by the `clippy … -D warnings` step in CI and `cargo xtask ci`.
+# Each crate opts in with `[lints] workspace = true`.
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
-
-# wasmtime's Cranelift backend is 10–50× slower to *run* when built unoptimized, which would make
-# the debug-profile gate (`cargo test`) spend seconds compiling each wasm artifact. Optimize just
-# the compiler crates — our own crates stay at opt-level 0, fast to build and debuggable — so cold
-# start stays realistic and the P3.3 latency budgets stay meaningful.
-[profile.dev.package.cranelift-codegen]
-opt-level = 2
-[profile.dev.package.regalloc2]
-opt-level = 2

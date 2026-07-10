@@ -5,20 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-# Dev orchestration (the cargo-xtask pattern). `cargo xtask ci` runs the full local gate — never shipped.
+# Dev orchestration (the cargo-xtask pattern). `cargo xtask ci` is the host-safe gate; never shipped.
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-# The golden harness loads each built artifact through the real host runtime and compares the
-# returned `Verdict` to the committed expectation — so goldens run against the *artifact*, not a
-# native shortcut. Dev-only; never on the detection path.
-agent-host = { path = "../crates/host" }
-agent-abi = { path = "../crates/abi" }
-serde_json.workspace = true
-# Per-detector `agent.toml` manifests (labels + size/latency budgets), parsed and enforced by the
-# budgets step of the gate (P4.4).
-serde = { workspace = true }
-toml.workspace = true
 
 [lints]
 workspace = true
